@@ -33,6 +33,7 @@ interface SyncState {
   platformProgress: Map<string, PlatformProgress>
   selectedPlatforms: string[]
   currentSyncId: string | null
+  publishDirectly: boolean // 是否直接发布（而非保存草稿）
 }
 
 const state: SyncState = {
@@ -42,6 +43,7 @@ const state: SyncState = {
   platformProgress: new Map(),
   selectedPlatforms: [],
   currentSyncId: null,
+  publishDirectly: false, // 默认保存为草稿
 }
 
 function injectSyncButton() {
@@ -428,6 +430,35 @@ function injectSyncButton() {
       .wechatsync-footer a:hover {
         color: #07c160;
       }
+
+      /* 发布选项 */
+      .wechatsync-publish-option {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 0;
+        font-size: 12px;
+        color: #666;
+        border-bottom: 1px solid #f0f0f0;
+        margin-bottom: 8px;
+      }
+
+      .wechatsync-publish-option input[type="checkbox"] {
+        width: 14px;
+        height: 14px;
+        cursor: pointer;
+      }
+
+      .wechatsync-publish-option label {
+        cursor: pointer;
+        user-select: none;
+      }
+
+      .wechatsync-publish-option .warning-text {
+        color: #ff4d4f;
+        font-size: 11px;
+        margin-left: 4px;
+      }
     </style>
 
     <div class="wechatsync-panel">
@@ -442,6 +473,15 @@ function injectSyncButton() {
       <!-- 平台选择区域 -->
       <div class="wechatsync-platforms" id="wechatsync-platforms">
         <div class="wechatsync-loading">加载中...</div>
+      </div>
+
+      <!-- 发布选项 -->
+      <div class="wechatsync-publish-option">
+        <input type="checkbox" id="wechatsync-publish-directly" />
+        <label for="wechatsync-publish-directly">
+          直接发布
+          <span class="warning-text">(默认保存为草稿)</span>
+        </label>
       </div>
 
       <div class="wechatsync-actions">
@@ -481,9 +521,15 @@ function injectSyncButton() {
   const panelHeader = document.getElementById('wechatsync-panel-header')!
   const historyLink = document.getElementById('wechatsync-history-link')!
   const addCmsLink = document.getElementById('wechatsync-add-cms-link')!
+  const publishDirectlyCheckbox = document.getElementById('wechatsync-publish-directly') as HTMLInputElement
 
   // 加载平台列表
   loadPlatforms()
+
+  // 监听发布选项变化
+  publishDirectlyCheckbox.addEventListener('change', () => {
+    state.publishDirectly = publishDirectlyCheckbox.checked
+  })
 
   // 主按钮点击 - 展开/收起
   mainBtn.addEventListener('click', () => {
@@ -659,7 +705,13 @@ function injectSyncButton() {
     try {
       const response = await chrome.runtime.sendMessage({
         type: 'SYNC_ARTICLE',
-        payload: { article, platforms: selectedPlatforms, source: 'weixin', syncId },
+        payload: { 
+          article, 
+          platforms: selectedPlatforms, 
+          source: 'weixin', 
+          syncId,
+          draftOnly: !state.publishDirectly // 传递发布选项
+        },
       })
 
       state.results = response.results || []

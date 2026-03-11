@@ -442,7 +442,19 @@ function preprocessForMultiplePlatformsLocal(
  */
 window.addEventListener('message', async (event) => {
   try {
-    const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
+    // 尝试解析消息数据
+    let data
+    try {
+      data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
+    } catch (parseError) {
+      // 忽略无法解析的消息（如头条的 "[tea-sdk]ready"）
+      return
+    }
+
+    // 只处理我们关心的消息类型
+    if (!data || !data.type) {
+      return
+    }
 
     if (data.type === 'CLOSE_EDITOR') {
       closeEditor()

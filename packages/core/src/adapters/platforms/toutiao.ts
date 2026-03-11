@@ -81,7 +81,7 @@ export class ToutiaoAdapter extends CodeAdapter {
 
   async publish(article: Article, options?: PublishOptions): Promise<SyncResult> {
     return this.withHeaderRules(this.HEADER_RULES, async () => {
-      logger.info('Starting publish...')
+      logger.info('Starting publish...', { draftOnly: options?.draftOnly })
 
       // Use pre-processed HTML content directly
       let content = article.html || ''
@@ -147,7 +147,10 @@ export class ToutiaoAdapter extends CodeAdapter {
       formData.append('title_id', titleId)
       formData.append('mp_editor_stat', '{}')
       formData.append('is_refute_rumor', '0')
-      formData.append('save', '0')
+      // save: '0' 直接发布, '1' 保存为草稿
+      const saveValue = options?.draftOnly === false ? '0' : '1'
+      logger.info('Setting save parameter:', { draftOnly: options?.draftOnly, saveValue })
+      formData.append('save', saveValue)
       formData.append('timer_status', '0')
       formData.append('timer_time', '')
       formData.append('educluecard', '')
@@ -250,8 +253,21 @@ export class ToutiaoAdapter extends CodeAdapter {
             body: fetchBody,
             credentials: 'include',
           })
-          const data = await response.json()
-          return { success: true, data }
+          
+          // 获取响应文本
+          const text = await response.text()
+          
+          // 尝试解析 JSON
+          try {
+            const data = JSON.parse(text)
+            return { success: true, data }
+          } catch (parseError) {
+            // 如果不是有效的 JSON，返回错误信息
+            return { 
+              success: false, 
+              error: `响应解析失败: ${text.substring(0, 100)}` 
+            }
+          }
         } catch (error) {
           return { success: false, error: (error as Error).message }
         }

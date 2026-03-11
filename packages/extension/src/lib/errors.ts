@@ -342,7 +342,6 @@ export function getPlatformErrorHint(platformName: string, error: string): strin
     'B站': '请确保在 bilibili.com 已登录（需开通专栏）',
     '微博': '请确保在 weibo.com 已登录',
     '搜狐号': '请确保在 mp.sohu.com 已登录',
-    '雪球': '请确保在 xueqiu.com 已登录',
   }
 
   // 如果是登录相关错误，返回特定提示

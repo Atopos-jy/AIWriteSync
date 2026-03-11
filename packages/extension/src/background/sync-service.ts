@@ -60,6 +60,7 @@ interface SyncHistoryItem {
 interface SyncOptions {
   skipHistory?: boolean
   source?: string
+  draftOnly?: boolean // 是否只保存草稿
 }
 
 // 进度回调
@@ -233,7 +234,7 @@ export async function performSync(
   options: SyncOptions = {},
   callbacks: SyncProgressCallbacks = {}
 ): Promise<{ results: SyncResult[]; syncId: string }> {
-  const { skipHistory = false, source = 'mcp' } = options
+  const { skipHistory = false, source = 'mcp', draftOnly = true } = options
   const { onResult, onImageProgress, onDetailProgress } = callbacks
 
   const allPlatformMetas = getAllPlatformMetas()
@@ -302,7 +303,7 @@ export async function performSync(
       onDetailProgress: (progress: SyncDetailProgress) => {
         onDetailProgress?.(progress)
       },
-    }, source)
+    }, source, draftOnly) // 传递 draftOnly 参数
   }
 
   // 同步到 CMS 账户
@@ -351,13 +352,13 @@ export async function performSync(
 
       switch (account.type) {
         case 'wordpress':
-          result = await wordpressAdapter.publish(credentials, normalizedArticle, { draftOnly: true })
+          result = await wordpressAdapter.publish(credentials, normalizedArticle, { draftOnly })
           break
         case 'typecho':
-          result = await metaweblogAdapter.publishToTypecho(credentials, normalizedArticle, { draftOnly: true })
+          result = await metaweblogAdapter.publishToTypecho(credentials, normalizedArticle, { draftOnly })
           break
         case 'metaweblog':
-          result = await metaweblogAdapter.publish(credentials, normalizedArticle, { draftOnly: true })
+          result = await metaweblogAdapter.publish(credentials, normalizedArticle, { draftOnly })
           break
         default:
           result = { success: false, error: '不支持的 CMS 类型' }
@@ -368,7 +369,7 @@ export async function performSync(
         platformName: account.name,
         success: result.success,
         postUrl: result.postUrl,
-        draftOnly: true,
+        draftOnly, // 使用传入的 draftOnly 参数
         error: result.error,
       }
       allResults.push(cmsResult)

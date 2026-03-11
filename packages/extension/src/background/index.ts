@@ -126,7 +126,7 @@ type MessageAction =
   | { type: 'GET_PLATFORMS' }
   | { type: 'CHECK_ALL_AUTH'; payload?: { forceRefresh?: boolean } }
   | { type: 'CHECK_AUTH'; payload: { platformId: string } }
-  | { type: 'SYNC_ARTICLE'; payload: { article: any; platforms: string[]; allSelectedPlatforms?: string[]; skipHistory?: boolean; source?: string; syncId?: string } }
+  | { type: 'SYNC_ARTICLE'; payload: { article: any; platforms: string[]; allSelectedPlatforms?: string[]; skipHistory?: boolean; source?: string; syncId?: string; draftOnly?: boolean } }
   | { type: 'OPEN_SYNC_PAGE'; path?: string }
   | { type: 'TEST_CMS_CONNECTION'; payload: { type: CMSType; url: string; username: string; password: string } }
   | { type: 'SYNC_TO_CMS'; payload: { accountId: string; article: any } }
@@ -200,7 +200,7 @@ async function handleMessage(message: MessageAction, sender?: chrome.runtime.Mes
     }
 
     case 'SYNC_ARTICLE': {
-      const { article, platforms, allSelectedPlatforms, skipHistory, source = 'popup', syncId: passedSyncId } = message.payload
+      const { article, platforms, allSelectedPlatforms, skipHistory, source = 'popup', syncId: passedSyncId, draftOnly = true } = message.payload
       const allPlatformMetas = getAllPlatformMetas()
 
       // 使用传入的 syncId 或生成新的
@@ -320,7 +320,7 @@ async function handleMessage(message: MessageAction, sender?: chrome.runtime.Mes
               payload: progress,
             })
           },
-        }, source)
+        }, source, draftOnly) // 传递 draftOnly 参数
       }
 
       // 同步到 CMS 账户
@@ -365,13 +365,13 @@ async function handleMessage(message: MessageAction, sender?: chrome.runtime.Mes
           let result
           switch (account.type) {
             case 'wordpress':
-              result = await wordpressAdapter.publish(credentials, article, { draftOnly: true })
+              result = await wordpressAdapter.publish(credentials, article, { draftOnly })
               break
             case 'typecho':
-              result = await metaweblogAdapter.publishToTypecho(credentials, article, { draftOnly: true })
+              result = await metaweblogAdapter.publishToTypecho(credentials, article, { draftOnly })
               break
             case 'metaweblog':
-              result = await metaweblogAdapter.publish(credentials, article, { draftOnly: true })
+              result = await metaweblogAdapter.publish(credentials, article, { draftOnly })
               break
             default:
               result = { success: false, error: '不支持的 CMS 类型' }
@@ -382,7 +382,7 @@ async function handleMessage(message: MessageAction, sender?: chrome.runtime.Mes
             platformName: account.name,
             success: result.success,
             postUrl: result.postUrl,
-            draftOnly: true,
+            draftOnly, // 使用传入的 draftOnly 参数
             error: result.error,
           }
           allResults.push(cmsResult)

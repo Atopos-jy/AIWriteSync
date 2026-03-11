@@ -24,6 +24,7 @@ export function HomeNew() {
     platformProgress,
     history,
     recovered,
+    publishDirectly,
     loadPlatforms,
     loadArticle,
     loadHistory,
@@ -31,6 +32,7 @@ export function HomeNew() {
     togglePlatform,
     selectAll,
     deselectAll,
+    setPublishDirectly,
     startSync,
     retryFailed,
     reset,
@@ -477,7 +479,7 @@ export function HomeNew() {
         )}
 
         {/* 按钮区 */}
-        <div className="p-4">
+        <div className="p-4 space-y-3">
           {status === 'completed' ? (
             <div className="flex gap-2">
               {failedCount > 0 && (
@@ -499,39 +501,53 @@ export function HomeNew() {
               </button>
             </div>
           ) : (
-            <button
-              onClick={async () => {
-                // 检查频率，仅提醒不阻止
-                const warning = await checkRateLimit()
-                if (warning) {
-                  setRateLimitWarning(warning)
-                  // 8秒后自动关闭提醒
-                  setTimeout(() => setRateLimitWarning(null), 8000)
-                }
-                // 无论有无警告都继续同步
-                startSync()
-              }}
-              disabled={!article || selectedPlatforms.length === 0 || status === 'syncing'}
-              className={cn(
-                'w-full py-3 rounded-lg font-medium transition-colors flex items-center justify-center gap-2',
-                !article || selectedPlatforms.length === 0
-                  ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                  : status === 'syncing'
-                  ? 'bg-primary/70 text-primary-foreground cursor-wait'
-                  : 'bg-primary text-primary-foreground hover:bg-primary/90'
-              )}
-            >
-              {status === 'syncing' ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  同步中 {results.length}/{selectedPlatforms.length}
-                </>
-              ) : (
-                <>
-                  🚀 同步到 {selectedPlatforms.length} 个平台
-                </>
-              )}
-            </button>
+            <>
+              {/* 发布选项 */}
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={publishDirectly}
+                  onChange={(e) => setPublishDirectly(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                />
+                <span className="text-foreground">直接发布</span>
+                <span className="text-xs text-muted-foreground">(默认保存为草稿)</span>
+              </label>
+
+              <button
+                onClick={async () => {
+                  // 检查频率，仅提醒不阻止
+                  const warning = await checkRateLimit()
+                  if (warning) {
+                    setRateLimitWarning(warning)
+                    // 8秒后自动关闭提醒
+                    setTimeout(() => setRateLimitWarning(null), 8000)
+                  }
+                  // 无论有无警告都继续同步
+                  startSync()
+                }}
+                disabled={!article || selectedPlatforms.length === 0 || status === 'syncing'}
+                className={cn(
+                  'w-full py-3 rounded-lg font-medium transition-colors flex items-center justify-center gap-2',
+                  !article || selectedPlatforms.length === 0
+                    ? 'bg-muted text-muted-foreground cursor-not-allowed'
+                    : status === 'syncing'
+                    ? 'bg-primary/70 text-primary-foreground cursor-wait'
+                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                )}
+              >
+                {status === 'syncing' ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    同步中 {results.length}/{selectedPlatforms.length}
+                  </>
+                ) : (
+                  <>
+                    🚀 同步到 {selectedPlatforms.length} 个平台
+                  </>
+                )}
+              </button>
+            </>
           )}
         </div>
       </footer>

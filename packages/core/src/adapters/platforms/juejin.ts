@@ -275,10 +275,86 @@ export class JuejinAdapter extends CodeAdapter {
 
       const draftUrl = `https://juejin.cn/editor/drafts/${draftId}`
 
+      // 如果需要直接发布，调用发布接口
+      if (options?.draftOnly === false) {
+        logger.info('Publishing draft:', draftId)
+        try {
+          const publishResponse = await this.runtime.fetch(
+            'https://api.juejin.cn/content_api/v1/article/publish',
+            {
+              method: 'POST',
+              credentials: 'include',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-secsdk-csrf-token': csrfToken,
+              },
+              body: JSON.stringify({
+                draft_id: draftId,
+                sync_to_org: false,
+                column_ids: [],
+              }),
+            }
+          )
+
+          const publishText = await publishResponse.text()
+          logger.debug('Publish response:', publishResponse.status, publishText.substring(0, 300))
+
+          if (!publishResponse.ok) {
+            logger.warn('发布失败，文章已保存为草稿')
+            // 发布失败但草稿已创建，返回草稿链接
+            return this.createResult(true, {
+              postId: draftId,
+              postUrl: draftUrl,
+              draftOnly: true, // 标记为草稿
+            })
+          }
+
+          let publishData: { data?: { article_id?: string }; err_msg?: string; err_no?: number }
+          try {
+            publishData = JSON.parse(publishText)
+          } catch {
+            logger.warn('发布响应解析失败，文章已保存为草稿')
+            return this.createResult(true, {
+              postId: draftId,
+              postUrl: draftUrl,
+              draftOnly: true,
+            })
+          }
+
+          if (publishData.err_no && publishData.err_no !== 0) {
+            logger.warn('发布失败:', publishData.err_msg, '文章已保存为草稿')
+            return this.createResult(true, {
+              postId: draftId,
+              postUrl: draftUrl,
+              draftOnly: true,
+            })
+          }
+
+          const articleId = publishData.data?.article_id || draftId
+          const publishedUrl = `https://juejin.cn/post/${articleId}`
+          logger.info('Published successfully:', articleId)
+
+          return this.createResult(true, {
+            postId: articleId,
+            postUrl: publishedUrl,
+            draftOnly: false, // 已发布
+          })
+        } catch (publishError) {
+          logger.warn('发布过程出错:', publishError, '文章已保存为草稿')
+          // 发布失败但草稿已创建，返回草稿链接
+          return this.createResult(true, {
+            postId: draftId,
+            postUrl: draftUrl,
+            draftOnly: true,
+          })
+        }
+      }
+
+      // 默认返回草稿
       return this.createResult(true, {
         postId: draftId,
         postUrl: draftUrl,
-        draftOnly: options?.draftOnly ?? true,
+        draftOnly: true,
       })
     }).catch((error) => this.createResult(false, {
       error: (error as Error).message,

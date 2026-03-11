@@ -62,7 +62,6 @@
 | 语雀 | yuque | 技术社区 | ✅ |
 | 豆瓣 | douban | 通用 | ✅ |
 | 搜狐号 | sohu | 通用 | ✅ |
-| 雪球 | xueqiu | 财经 | ✅ |
 | 人人都是产品经理 | woshipm | 产品 | ✅ |
 | 大鱼号 | dayu | 通用 | ✅ |
 | 一点号 | yidian | 通用 | ✅ |
@@ -70,10 +69,8 @@
 | 慕课网 | imooc | 技术社区 | ✅ |
 | 开源中国 | oschina | 技术社区 | ✅ |
 | SegmentFault | segmentfault | 技术社区 | ✅ |
-| 搜狐焦点 | sohufocus | 房产 | ✅ |
 | 小红书 | xiaohongshu | 主流自媒体 | ✅ |
 | X (Twitter) | x | 海外 | ✅ |
-| 东方财富 | eastmoney | 财经 | ✅ |
 | WordPress | wordpress | 自建站 | ✅ |
 | Typecho | typecho | 自建站 | ✅ |
 

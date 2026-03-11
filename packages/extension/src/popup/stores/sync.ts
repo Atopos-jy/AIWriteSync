@@ -134,6 +134,9 @@ interface SyncState {
   // 频率限制警告
   rateLimitWarning: string | null
 
+  // 是否直接发布（而非保存草稿）
+  publishDirectly: boolean
+
   // Actions
   loadPlatforms: () => Promise<void>
   loadArticle: () => Promise<void>
@@ -142,6 +145,7 @@ interface SyncState {
   togglePlatform: (platformId: string) => void
   selectAll: () => void
   deselectAll: () => void
+  setPublishDirectly: (value: boolean) => void
   checkRateLimit: () => Promise<string | null>
   startSync: () => Promise<void>
   retryFailed: () => Promise<void>
@@ -193,6 +197,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
   history: [],
   recovered: false,
   rateLimitWarning: null,
+  publishDirectly: false, // 默认保存为草稿
 
   recoverSyncState: async () => {
     // 避免重复恢复
@@ -373,14 +378,18 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     trackPlatformSelection('deselect_all', 'all', 0).catch(() => {})
   },
 
+  setPublishDirectly: (value: boolean) => {
+    set({ publishDirectly: value })
+  },
+
   checkRateLimit: async () => {
     const { selectedPlatforms } = get()
     return checkSyncFrequency(selectedPlatforms)
   },
 
   startSync: async () => {
-    const { article, selectedPlatforms, platforms } = get()
-    logger.debug('startSync called', { article, selectedPlatforms })
+    const { article, selectedPlatforms, platforms, publishDirectly } = get()
+    logger.debug('startSync called', { article, selectedPlatforms, publishDirectly })
 
     if (!article) {
       set({ error: '未检测到文章内容' })
@@ -402,10 +411,15 @@ export const useSyncStore = create<SyncState>((set, get) => ({
 
     try {
       // SYNC_ARTICLE 现在同时处理 DSL 和 CMS 平台
-      // 传递 syncId 给 background，background 会用这个 ID
+      // 传递 syncId 和 draftOnly 给 background
       const response = await chrome.runtime.sendMessage({
         type: 'SYNC_ARTICLE',
-        payload: { article, platforms: selectedPlatforms, syncId },
+        payload: { 
+          article, 
+          platforms: selectedPlatforms, 
+          syncId,
+          draftOnly: !publishDirectly // 传递发布选项
+        },
       })
 
       const allResults: SyncResult[] = response.results || []
@@ -451,7 +465,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
   },
 
   retryFailed: async () => {
-    const { article, results, platforms } = get()
+    const { article, results, platforms, publishDirectly } = get()
 
     if (!article) {
       set({ error: '未检测到文章内容' })
@@ -480,7 +494,13 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       // SYNC_ARTICLE 现在同时处理 DSL 和 CMS 平台
       const response = await chrome.runtime.sendMessage({
         type: 'SYNC_ARTICLE',
-        payload: { article, platforms: failedPlatformIds, skipHistory: true, syncId },
+        payload: { 
+          article, 
+          platforms: failedPlatformIds, 
+          skipHistory: true, 
+          syncId,
+          draftOnly: !publishDirectly // 传递发布选项
+        },
       })
 
       const retryResults: SyncResult[] = response.results || []

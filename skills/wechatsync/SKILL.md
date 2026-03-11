@@ -68,7 +68,7 @@ wechatsync extract -o article.md
 
 ## 支持的平台
 
-zhihu, juejin, jianshu, toutiao, weibo, bilibili, baijiahao, csdn, yuque, douban, sohu, xueqiu, weixin, woshipm, dayu, yidian, 51cto, sohufocus, imooc, oschina, segmentfault, cnblogs, x, xiaohongshu
+zhihu, juejin, jianshu, toutiao, weibo, bilibili, baijiahao, csdn, yuque, douban, sohu, weixin, woshipm, dayu, yidian, 51cto, imooc, oschina, segmentfault, cnblogs, x, xiaohongshu
 
 ## 图片处理
 

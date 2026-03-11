@@ -2,7 +2,6 @@
  * 平台适配器导出
  */
 export { DoubanAdapter } from './douban'
-export { XueqiuAdapter } from './xueqiu'
 export { SohuAdapter } from './sohu'
 export { DaYuAdapter } from './dayu'
 export { WoshipmAdapter } from './woshipm'
@@ -18,10 +17,8 @@ export { WeixinAdapter } from './weixin'
 export { JianshuAdapter } from './jianshu'
 export { YidianAdapter } from './yidian'
 export { Cto51Adapter } from './cto51'
-export { SohuFocusAdapter } from './sohufocus'
 export { ImoocAdapter } from './imooc'
 export { OschinaAdapter } from './oschina'
 export { SegmentfaultAdapter } from './segmentfault'
 export { CnblogsAdapter } from './cnblogs'
 export { ZipDownloadAdapter } from './zip-download'
-export { EastmoneyAdapter } from './eastmoney'
