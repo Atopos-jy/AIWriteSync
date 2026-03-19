@@ -7,17 +7,17 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "yarn workspace @wechatsync/extension dev",
-    "build": "yarn workspaces run build",
-    "build:core": "yarn workspace @wechatsync/core build",
-    "build:extension": "yarn workspace @wechatsync/extension build",
-    "build:mcp": "yarn workspace @wechatsync/mcp-server build",
-    "build:cli": "yarn workspace @wechatsync/cli build",
-    "mcp": "yarn workspace @wechatsync/mcp-server start",
-    "test": "yarn workspaces run test",
+    "dev": "pnpm workspace @wechatsync/extension dev",
+    "build": "pnpm workspaces run build",
+    "build:core": "pnpm workspace @wechatsync/core build",
+    "build:extension": "pnpm workspace @wechatsync/extension build",
+    "build:mcp": "pnpm workspace @wechatsync/mcp-server build",
+    "build:cli": "pnpm workspace @wechatsync/cli build",
+    "mcp": "pnpm workspace @wechatsync/mcp-server start",
+    "test": "pnpm workspaces run test",
     "lint": "eslint packages --ext .ts,.tsx",
-    "typecheck": "yarn workspaces run typecheck",
-    "clean": "yarn workspaces run clean && rm -rf node_modules"
+    "typecheck": "pnpm workspaces run typecheck",
+    "clean": "pnpm workspaces run clean && rm -rf node_modules"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

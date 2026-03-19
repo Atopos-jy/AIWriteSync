@@ -1,257 +1,307 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { X, Check, Loader2, ExternalLink } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { createLogger } from '../lib/logger'
+import { useState, useRef, useEffect, useCallback } from "react";
+import { X, Check, Loader2, ExternalLink } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { createLogger } from "../lib/logger";
+import { log } from "console";
 
-const logger = createLogger('Editor')
+const logger = createLogger("Editor");
 
 interface Article {
-  title: string
-  content: string
-  cover?: string
-  url?: string
+  title: string;
+  content: string;
+  cover?: string;
+  url?: string;
 }
 
 interface Platform {
-  id: string
-  name: string
-  icon: string
-  isAuthenticated: boolean
-  username?: string
+  id: string;
+  name: string;
+  icon: string;
+  isAuthenticated: boolean;
+  username?: string;
 }
 
 interface SyncResult {
-  platform: string
-  platformName?: string
-  success: boolean
-  postUrl?: string
-  error?: string
+  platform: string;
+  platformName?: string;
+  success: boolean;
+  postUrl?: string;
+  error?: string;
 }
 
 // 同步阶段类型
-type SyncStage = 'starting' | 'uploading_images' | 'saving' | 'completed' | 'failed'
+type SyncStage =
+  | "starting"
+  | "uploading_images"
+  | "saving"
+  | "completed"
+  | "failed";
 
 // 平台同步详细进度
 interface PlatformProgress {
-  platform: string
-  platformName: string
-  stage: SyncStage
-  imageProgress?: { current: number; total: number }
-  error?: string
+  platform: string;
+  platformName: string;
+  stage: SyncStage;
+  imageProgress?: { current: number; total: number };
+  error?: string;
 }
 
-type SyncStatus = 'idle' | 'syncing' | 'completed'
+type SyncStatus = "idle" | "syncing" | "completed";
 
 // Storage key for selected platforms (same as popup)
-const SELECTED_PLATFORMS_KEY = 'selectedPlatforms'
+const SELECTED_PLATFORMS_KEY = "selectedPlatforms";
 
 // 保存选中的平台到 storage
 function saveSelectedPlatforms(platformIds: string[]) {
-  chrome.storage.local.set({ [SELECTED_PLATFORMS_KEY]: platformIds }).catch((e) => {
-    logger.error('Failed to save selected platforms:', e)
-  })
+  chrome.storage.local
+    .set({ [SELECTED_PLATFORMS_KEY]: platformIds })
+    .catch((e) => {
+      logger.error("Failed to save selected platforms:", e);
+    });
 }
 
 export function EditorApp() {
-  const [article, setArticle] = useState<Article | null>(null)
-  const [platforms, setPlatforms] = useState<Platform[]>([])
-  const [selectedPlatforms, setSelectedPlatforms] = useState<Set<string>>(new Set())
-  const [status, setStatus] = useState<SyncStatus>('idle')
-  const [results, setResults] = useState<SyncResult[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const [rateLimitWarning, setRateLimitWarning] = useState<string | null>(null)
-  const [platformProgress, setPlatformProgress] = useState<Map<string, PlatformProgress>>(new Map())
-  const [currentSyncId, setCurrentSyncId] = useState<string | null>(null)
-  const currentSyncIdRef = useRef<string | null>(null)
+  const [article, setArticle] = useState<Article | null>(null);
+  const [platforms, setPlatforms] = useState<Platform[]>([]);
+  const [selectedPlatforms, setSelectedPlatforms] = useState<Set<string>>(
+    new Set(),
+  );
+  const [status, setStatus] = useState<SyncStatus>("idle");
+  const [results, setResults] = useState<SyncResult[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [rateLimitWarning, setRateLimitWarning] = useState<string | null>(null);
+  const [platformProgress, setPlatformProgress] = useState<
+    Map<string, PlatformProgress>
+  >(new Map());
+  const [currentSyncId, setCurrentSyncId] = useState<string | null>(null);
+  const currentSyncIdRef = useRef<string | null>(null);
 
   // 保持 ref 与 state 同步
   useEffect(() => {
-    currentSyncIdRef.current = currentSyncId
-  }, [currentSyncId])
+    currentSyncIdRef.current = currentSyncId;
+  }, [currentSyncId]);
 
-  const titleRef = useRef<HTMLHeadingElement>(null)
-  const contentRef = useRef<HTMLDivElement>(null)
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   // 接收来自父窗口的消息
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       try {
-        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
+        const data =
+          typeof event.data === "string" ? JSON.parse(event.data) : event.data;
 
         // 如果消息带有 syncId，需要匹配当前的 syncId
         if (data.syncId) {
           // 如果当前没有 syncId，保存这个 syncId（新同步开始）
           if (!currentSyncIdRef.current) {
-            setCurrentSyncId(data.syncId)
+            setCurrentSyncId(data.syncId);
           } else if (data.syncId !== currentSyncIdRef.current) {
             // 如果已有 syncId 且不匹配，忽略消息
-            logger.debug('Ignoring message with different syncId:', data.syncId, 'current:', currentSyncIdRef.current)
-            return
+            logger.debug(
+              "Ignoring message with different syncId:",
+              data.syncId,
+              "current:",
+              currentSyncIdRef.current,
+            );
+            return;
           }
         }
 
-        logger.debug('Received message:', data)
+        logger.debug("Received message:", data);
 
-        if (data.type === 'ARTICLE_DATA') {
-          setArticle(data.article)
+        if (data.type === "ARTICLE_DATA") {
+          setArticle(data.article);
           // 设置初始内容
           if (contentRef.current && data.article.content) {
-            contentRef.current.innerHTML = data.article.content
+            contentRef.current.innerHTML = data.article.content;
           }
-        } else if (data.type === 'PLATFORMS_DATA') {
-          setPlatforms(data.platforms)
+        } else if (data.type === "PLATFORMS_DATA") {
+          setPlatforms(data.platforms);
           // 使用传递的已选中平台，如果没有则从 storage 读取
           if (data.selectedPlatformIds && data.selectedPlatformIds.length > 0) {
-            setSelectedPlatforms(new Set(data.selectedPlatformIds))
-            saveSelectedPlatforms(data.selectedPlatformIds)
+            setSelectedPlatforms(new Set(data.selectedPlatformIds));
+            saveSelectedPlatforms(data.selectedPlatformIds);
           } else {
             // 从 storage 读取上次选中的平台
-            chrome.storage.local.get(SELECTED_PLATFORMS_KEY).then((result) => {
-              const storedPlatforms = result[SELECTED_PLATFORMS_KEY] as string[] | undefined
-              const authenticated = data.platforms.filter((p: Platform) => p.isAuthenticated)
-              const authenticatedIds = authenticated.map((p: Platform) => p.id)
-              const authenticatedSet = new Set(authenticatedIds)
+            chrome.storage.local
+              .get(SELECTED_PLATFORMS_KEY)
+              .then((result) => {
+                const storedPlatforms = result[SELECTED_PLATFORMS_KEY] as
+                  | string[]
+                  | undefined;
+                const authenticated = data.platforms.filter(
+                  (p: Platform) => p.isAuthenticated,
+                );
+                const authenticatedIds = authenticated.map(
+                  (p: Platform) => p.id,
+                );
+                const authenticatedSet = new Set(authenticatedIds);
 
-              let selected: string[]
-              if (storedPlatforms && storedPlatforms.length > 0) {
-                // 过滤掉未登录的平台
-                selected = storedPlatforms.filter(id => authenticatedSet.has(id))
-              } else {
-                // 默认选中所有已登录平台
-                selected = authenticatedIds
-              }
+                let selected: string[];
+                if (storedPlatforms && storedPlatforms.length > 0) {
+                  // 过滤掉未登录的平台
+                  selected = storedPlatforms.filter((id) =>
+                    authenticatedSet.has(id),
+                  );
+                } else {
+                  // 默认选中所有已登录平台
+                  selected = authenticatedIds;
+                }
 
-              if (selected.length === 0) {
-                // 如果过滤后为空，选中所有已登录平台
-                selected = authenticatedIds
-              }
+                if (selected.length === 0) {
+                  // 如果过滤后为空，选中所有已登录平台
+                  selected = authenticatedIds;
+                }
 
-              setSelectedPlatforms(new Set(selected))
-            }).catch((e) => {
-              logger.error('Failed to load selected platforms:', e)
-              // 失败时默认选中所有已登录平台
-              const authenticated = data.platforms.filter((p: Platform) => p.isAuthenticated)
-              setSelectedPlatforms(new Set(authenticated.map((p: Platform) => p.id)))
-            })
+                setSelectedPlatforms(new Set(selected));
+              })
+              .catch((e) => {
+                logger.error("Failed to load selected platforms:", e);
+                // 失败时默认选中所有已登录平台
+                const authenticated = data.platforms.filter(
+                  (p: Platform) => p.isAuthenticated,
+                );
+                setSelectedPlatforms(
+                  new Set(authenticated.map((p: Platform) => p.id)),
+                );
+              });
           }
-        } else if (data.type === 'SYNC_PROGRESS') {
+        } else if (data.type === "SYNC_PROGRESS") {
           if (data.result) {
-            setResults(prev => [...prev, data.result])
+            setResults((prev) => [...prev, data.result]);
           }
-        } else if (data.type === 'SYNC_DETAIL_PROGRESS') {
+        } else if (data.type === "SYNC_DETAIL_PROGRESS") {
           // 更新平台详细进度
-          const progress = data.progress
+          const progress = data.progress;
           if (progress?.platform) {
-            setPlatformProgress(prev => {
-              const next = new Map(prev)
-              next.set(progress.platform, progress)
-              return next
-            })
+            setPlatformProgress((prev) => {
+              const next = new Map(prev);
+              next.set(progress.platform, progress);
+              return next;
+            });
           }
-        } else if (data.type === 'SYNC_COMPLETE') {
-          setStatus('completed')
+        } else if (data.type === "SYNC_COMPLETE") {
+          setStatus("completed");
           // 显示频率限制警告（如果有）
           if (data.rateLimitWarning) {
-            setRateLimitWarning(data.rateLimitWarning)
+            setRateLimitWarning(data.rateLimitWarning);
             // 8秒后自动关闭
-            setTimeout(() => setRateLimitWarning(null), 8000)
+            setTimeout(() => setRateLimitWarning(null), 8000);
           }
-        } else if (data.type === 'SYNC_ERROR') {
-          setError(data.error)
-          setStatus('idle')
+        } else if (data.type === "SYNC_ERROR") {
+          setError(data.error);
+          setStatus("idle");
         }
       } catch (e) {
-        logger.error('Failed to parse message:', e)
+        logger.error("Failed to parse message:", e);
       }
-    }
+    };
 
-    window.addEventListener('message', handleMessage)
+    window.addEventListener("message", handleMessage);
 
     // 通知父窗口已准备好
-    window.parent.postMessage(JSON.stringify({ type: 'EDITOR_READY' }), '*')
+    window.parent.postMessage(JSON.stringify({ type: "EDITOR_READY" }), "*");
 
-    return () => window.removeEventListener('message', handleMessage)
-  }, [])
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
 
   // 关闭编辑器
   const handleClose = useCallback(() => {
-    window.parent.postMessage(JSON.stringify({ type: 'CLOSE_EDITOR' }), '*')
-  }, [])
+    window.parent.postMessage(JSON.stringify({ type: "CLOSE_EDITOR" }), "*");
+  }, []);
 
   // 切换平台选中状态
   const togglePlatform = (id: string) => {
-    setSelectedPlatforms(prev => {
-      const next = new Set(prev)
+    setSelectedPlatforms((prev) => {
+      const next = new Set(prev);
       if (next.has(id)) {
-        next.delete(id)
+        next.delete(id);
       } else {
-        next.add(id)
+        next.add(id);
       }
       // 保存到 storage，与 popup 同步
-      saveSelectedPlatforms(Array.from(next))
-      return next
-    })
-  }
+      saveSelectedPlatforms(Array.from(next));
+      return next;
+    });
+  };
 
   // 开始同步
   const handleSync = () => {
-    if (!article || selectedPlatforms.size === 0) return
+    if (!article || selectedPlatforms.size === 0) return;
 
     // 获取编辑后的内容
     const editedArticle = {
       ...article,
       title: titleRef.current?.innerText || article.title,
       content: contentRef.current?.innerHTML || article.content,
-    }
+    };
 
     // 生成 syncId（在发送消息前设置，以便立即过滤消息）
-    const syncId = `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    setCurrentSyncId(syncId)
+    const syncId = `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    setCurrentSyncId(syncId);
 
-    setStatus('syncing')
-    setResults([])
-    setError(null)
-    setPlatformProgress(new Map())
+    setStatus("syncing");
+    setResults([]);
+    setError(null);
+    setPlatformProgress(new Map());
 
     // 发送同步请求到父窗口（带上 syncId）
-    window.parent.postMessage(JSON.stringify({
-      type: 'START_SYNC',
-      article: editedArticle,
-      platforms: Array.from(selectedPlatforms),
-      syncId,
-    }), '*')
-  }
+    window.parent.postMessage(
+      JSON.stringify({
+        type: "START_SYNC",
+        article: editedArticle,
+        platforms: Array.from(selectedPlatforms),
+        syncId,
+      }),
+      "*",
+    );
+  };
 
   // 重试失败项
   const handleRetry = () => {
-    const failedPlatforms = results.filter(r => !r.success).map(r => r.platform)
-    if (failedPlatforms.length === 0) return
+    const failedPlatforms = results
+      .filter((r) => !r.success)
+      .map((r) => r.platform);
+    if (failedPlatforms.length === 0) return;
 
     const editedArticle = {
       ...article!,
       title: titleRef.current?.innerText || article!.title,
       content: contentRef.current?.innerHTML || article!.content,
-    }
+    };
 
     // 生成新的 syncId
-    const syncId = `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    setCurrentSyncId(syncId)
+    const syncId = `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    setCurrentSyncId(syncId);
 
-    setStatus('syncing')
-    setResults(prev => prev.filter(r => r.success))
-    setPlatformProgress(new Map()) // 清空进度
+    setStatus("syncing");
+    setResults((prev) => prev.filter((r) => r.success));
+    setPlatformProgress(new Map()); // 清空进度
 
-    window.parent.postMessage(JSON.stringify({
-      type: 'START_SYNC',
-      article: editedArticle,
-      platforms: failedPlatforms,
-      syncId,
-    }), '*')
-  }
+    window.parent.postMessage(
+      JSON.stringify({
+        type: "START_SYNC",
+        article: editedArticle,
+        platforms: failedPlatforms,
+        syncId,
+      }),
+      "*",
+    );
+  };
 
-  const authenticatedPlatforms = platforms.filter(p => p.isAuthenticated)
-  const successCount = results.filter(r => r.success).length
-  const failedCount = results.filter(r => !r.success).length
+  //上传封面
+  const handleRemoveCover = () => {
+    console.log("删除封面");
+  };
+
+  const handleCoverUpload = () => {
+    console.log("上传封面");
+  };
+
+  const authenticatedPlatforms = platforms.filter((p) => p.isAuthenticated);
+  const successCount = results.filter((r) => r.success).length;
+  const failedCount = results.filter((r) => !r.success).length;
 
   if (!article) {
     return (
@@ -261,7 +311,7 @@ export function EditorApp() {
           <p className="mt-2 text-gray-500">加载文章中...</p>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -270,27 +320,33 @@ export function EditorApp() {
       <header className="fixed top-0 left-0 right-0 bg-white border-b shadow-sm z-50">
         <div className="px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <img src={chrome.runtime.getURL('assets/icon-48.png')} alt="Logo" className="w-6 h-6" />
-            <span className="font-medium text-gray-700">同步助手 - 编辑模式</span>
+            <img
+              src={chrome.runtime.getURL("assets/icon-48.png")}
+              alt="Logo"
+              className="w-6 h-6"
+            />
+            <span className="font-medium text-gray-700">
+              同步助手 - 编辑模式
+            </span>
           </div>
 
           <div className="flex items-center gap-2">
-            {status === 'idle' && (
+            {status === "idle" && (
               <button
                 onClick={handleSync}
                 disabled={selectedPlatforms.size === 0}
                 className={cn(
-                  'px-4 py-2 rounded-lg font-medium transition-colors',
+                  "px-4 py-2 rounded-lg font-medium transition-colors",
                   selectedPlatforms.size > 0
-                    ? 'bg-blue-500 text-white hover:bg-blue-600'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    ? "bg-blue-500 text-white hover:bg-blue-600"
+                    : "bg-gray-200 text-gray-400 cursor-not-allowed",
                 )}
               >
                 同步到 {selectedPlatforms.size} 个平台
               </button>
             )}
 
-            {status === 'syncing' && (
+            {status === "syncing" && (
               <div className="flex items-center gap-2">
                 <span className="px-4 py-2 rounded-lg bg-blue-400 text-white flex items-center gap-2">
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -298,9 +354,9 @@ export function EditorApp() {
                 </span>
                 <button
                   onClick={() => {
-                    setStatus('idle')
-                    setResults([])
-                    setError(null)
+                    setStatus("idle");
+                    setResults([]);
+                    setError(null);
                   }}
                   className="px-3 py-2 rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors text-sm"
                 >
@@ -309,7 +365,7 @@ export function EditorApp() {
               </div>
             )}
 
-            {status === 'completed' && (
+            {status === "completed" && (
               <div className="flex items-center gap-2">
                 {failedCount > 0 && (
                   <button
@@ -324,10 +380,10 @@ export function EditorApp() {
                 </span>
                 <button
                   onClick={() => {
-                    setStatus('idle')
-                    setResults([])
-                    setPlatformProgress(new Map())
-                    setCurrentSyncId(null)
+                    setStatus("idle");
+                    setResults([]);
+                    setPlatformProgress(new Map());
+                    setCurrentSyncId(null);
                   }}
                   className="px-4 py-2 rounded-lg bg-green-500 text-white hover:bg-green-600"
                 >
@@ -353,54 +409,53 @@ export function EditorApp() {
           <div className="flex items-center gap-1 flex-shrink-0 mr-2">
             <button
               onClick={() => {
-                const allIds = authenticatedPlatforms.map(p => p.id)
-                setSelectedPlatforms(new Set(allIds))
-                saveSelectedPlatforms(allIds)
+                const allIds = authenticatedPlatforms.map((p) => p.id);
+                setSelectedPlatforms(new Set(allIds));
+                saveSelectedPlatforms(allIds);
               }}
-              disabled={status === 'syncing'}
+              disabled={status === "syncing"}
               className="px-2 py-1 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 text-gray-600 disabled:opacity-50"
             >
               全选
             </button>
             <button
               onClick={() => {
-                setSelectedPlatforms(new Set())
-                saveSelectedPlatforms([])
+                setSelectedPlatforms(new Set());
+                saveSelectedPlatforms([]);
               }}
-              disabled={status === 'syncing'}
+              disabled={status === "syncing"}
               className="px-2 py-1 text-xs rounded border border-gray-300 bg-white hover:bg-gray-50 text-gray-600 disabled:opacity-50"
             >
               全不选
             </button>
           </div>
-          {authenticatedPlatforms.map(platform => {
-            const isSelected = selectedPlatforms.has(platform.id)
-            const result = results.find(r => r.platform === platform.id)
+          {authenticatedPlatforms.map((platform) => {
+            const isSelected = selectedPlatforms.has(platform.id);
+            const result = results.find((r) => r.platform === platform.id);
 
             return (
               <button
                 key={platform.id}
                 onClick={() => togglePlatform(platform.id)}
-                disabled={status === 'syncing'}
+                disabled={status === "syncing"}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm transition-all flex-shrink-0',
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm transition-all flex-shrink-0",
                   isSelected
-                    ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
-                    : 'bg-white text-gray-600 border border-gray-200 hover:border-gray-300',
-                  status === 'syncing' && 'opacity-50 cursor-not-allowed'
+                    ? "bg-blue-100 text-blue-700 border-2 border-blue-300"
+                    : "bg-white text-gray-600 border border-gray-200 hover:border-gray-300",
+                  status === "syncing" && "opacity-50 cursor-not-allowed",
                 )}
               >
                 <img src={platform.icon} alt="" className="w-4 h-4 rounded" />
                 <span>{platform.name}</span>
-                {result && (
-                  result.success ? (
+                {result &&
+                  (result.success ? (
                     <Check className="w-3 h-3 text-green-500" />
                   ) : (
                     <X className="w-3 h-3 text-red-500" />
-                  )
-                )}
+                  ))}
               </button>
-            )
+            );
           })}
         </div>
       </header>
@@ -423,15 +478,60 @@ export function EditorApp() {
 
       {/* 文章内容区 */}
       <main className="pt-28 pb-16">
-        <article className="w-full max-w-4xl mx-auto bg-white shadow-sm px-12 py-10" style={{ minHeight: 'calc(100vh - 7rem)' }}>
+        <article
+          className="w-full max-w-4xl mx-auto bg-white shadow-sm px-12 py-10"
+          style={{ minHeight: "calc(100vh - 7rem)" }}
+        >
           {/* 封面图 */}
-          {article.cover && (
-            <img
-              src={article.cover}
-              alt=""
-              className="w-full max-h-80 object-cover mb-8"
-            />
-          )}
+          <div className="mb-8">
+            <label className="block text-gray-700 font-medium mb-2">
+              文章封面
+            </label>
+            <div className="relative">
+              {article.cover ? (
+                // 已有封面图时显示预览 + 移除按钮
+                <>
+                  <img
+                    src={article.cover}
+                    alt="封面预览"
+                    className="w-full max-h-80 object-cover"
+                  />
+                  <button
+                    onClick={() => handleRemoveCover()}
+                    className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-8 h-8 flex items-center justify-center cursor-pointer"
+                  >
+                    ×
+                  </button>
+                </>
+              ) : (
+                // 无封面图时显示上传提示
+                <div className="w-full h-40 flex flex-col items-center justify-center text-gray-400">
+                  <svg
+                    className="w-12 h-12 mb-2"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                    />
+                  </svg>
+                  <span>点击或拖拽上传封面图</span>
+                </div>
+              )}
+              {/* 隐藏的文件上传输入框 */}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleCoverUpload}
+                className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer"
+              />
+            </div>
+          </div>
 
           {/* 标题 - 可编辑 */}
           <h1
@@ -450,9 +550,9 @@ export function EditorApp() {
             suppressContentEditableWarning
             className="outline-none focus:bg-blue-50/50 rounded article-content"
             style={{
-              fontSize: '16px',
-              lineHeight: '1.8',
-              color: '#333',
+              fontSize: "16px",
+              lineHeight: "1.8",
+              color: "#333",
             }}
             dangerouslySetInnerHTML={{ __html: article.content }}
           />
@@ -481,40 +581,50 @@ export function EditorApp() {
       </main>
 
       {/* 同步进度/结果浮窗 */}
-      {(status === 'syncing' || results.length > 0) && (
+      {(status === "syncing" || results.length > 0) && (
         <div className="fixed bottom-4 right-4 bg-white rounded-lg shadow-lg border p-4 w-80 max-h-80 overflow-y-auto z-50">
           <h3 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-            {status === 'syncing' && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
-            {status === 'syncing' ? '同步中' : '同步结果'}
+            {status === "syncing" && (
+              <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+            )}
+            {status === "syncing" ? "同步中" : "同步结果"}
             <span className="text-sm font-normal text-gray-500">
               {results.length}/{selectedPlatforms.size}
             </span>
           </h3>
           <div className="space-y-2">
-            {Array.from(selectedPlatforms).map(platformId => {
-              const platform = platforms.find(p => p.id === platformId)
-              const result = results.find(r => r.platform === platformId)
-              const progress = platformProgress.get(platformId)
+            {Array.from(selectedPlatforms).map((platformId) => {
+              const platform = platforms.find((p) => p.id === platformId);
+              const result = results.find((r) => r.platform === platformId);
+              const progress = platformProgress.get(platformId);
 
               // 获取阶段文本
               const getStageText = (p: PlatformProgress) => {
                 switch (p.stage) {
-                  case 'starting': return '准备中...'
-                  case 'uploading_images':
+                  case "starting":
+                    return "准备中...";
+                  case "uploading_images":
                     return p.imageProgress
                       ? `上传图片 ${p.imageProgress.current}/${p.imageProgress.total}`
-                      : '上传图片...'
-                  case 'saving': return '保存文章...'
-                  case 'completed': return '完成'
-                  case 'failed': return p.error || '失败'
-                  default: return '等待中'
+                      : "上传图片...";
+                  case "saving":
+                    return "保存文章...";
+                  case "completed":
+                    return "完成";
+                  case "failed":
+                    return p.error || "失败";
+                  default:
+                    return "等待中";
                 }
-              }
+              };
 
               if (result) {
                 // 已完成
                 return (
-                  <div key={platformId} className="flex items-center justify-between text-sm">
+                  <div
+                    key={platformId}
+                    className="flex items-center justify-between text-sm"
+                  >
                     <span className="flex items-center gap-2">
                       {result.success ? (
                         <Check className="w-4 h-4 text-green-500" />
@@ -534,18 +644,24 @@ export function EditorApp() {
                       </a>
                     )}
                     {!result.success && result.error && (
-                      <span className="text-red-500 truncate max-w-[120px]" title={result.error}>
+                      <span
+                        className="text-red-500 truncate max-w-[120px]"
+                        title={result.error}
+                      >
                         {result.error}
                       </span>
                     )}
                   </div>
-                )
+                );
               }
 
               if (progress) {
                 // 进行中
                 return (
-                  <div key={platformId} className="flex items-center justify-between text-sm">
+                  <div
+                    key={platformId}
+                    className="flex items-center justify-between text-sm"
+                  >
                     <span className="flex items-center gap-2">
                       <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
                       {platform?.name || platformId}
@@ -554,19 +670,22 @@ export function EditorApp() {
                       {getStageText(progress)}
                     </span>
                   </div>
-                )
+                );
               }
 
               // 等待中
               return (
-                <div key={platformId} className="flex items-center justify-between text-sm text-gray-400">
+                <div
+                  key={platformId}
+                  className="flex items-center justify-between text-sm text-gray-400"
+                >
                   <span className="flex items-center gap-2">
                     <div className="w-4 h-4 rounded-full border border-gray-300" />
                     {platform?.name || platformId}
                   </span>
                   <span className="text-xs">等待中</span>
                 </div>
-              )
+              );
             })}
           </div>
         </div>
@@ -585,5 +704,5 @@ export function EditorApp() {
         </div>
       )}
     </div>
-  )
+  );
 }
