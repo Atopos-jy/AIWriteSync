@@ -10,7 +10,6 @@
       "@wechatsync/core/*": ["../core/src/*"]
     },
     "outDir": "dist",
-    "rootDir": "src",
     "strict": true,
     "declaration": true,
     "declarationMap": true,

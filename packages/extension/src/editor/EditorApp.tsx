@@ -1,16 +1,23 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { X, Check, Loader2, ExternalLink } from "lucide-react";
+import { X, Check, Loader2, ExternalLink, Edit2, Eye } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import { cn } from "@/lib/utils";
 import { createLogger } from "../lib/logger";
-import { log } from "console";
-
+import { useDebounce } from "use-debounce";
 const logger = createLogger("Editor");
 
 interface Article {
   title: string;
+  author?: string;
+  summary?: string;
   content: string;
   cover?: string;
   url?: string;
+  tags?: string[];
+  category?: string;
+  publishDate?: string;
 }
 
 interface Platform {
@@ -62,6 +69,8 @@ function saveSelectedPlatforms(platformIds: string[]) {
 
 export function EditorApp() {
   const [article, setArticle] = useState<Article | null>(null);
+  const [editorMode, setEditorMode] = useState<"preview" | "edit">("preview");
+  const [isMDMode, setIsMDMode] = useState<boolean>(false);
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [selectedPlatforms, setSelectedPlatforms] = useState<Set<string>>(
     new Set(),
@@ -76,13 +85,81 @@ export function EditorApp() {
   const [currentSyncId, setCurrentSyncId] = useState<string | null>(null);
   const currentSyncIdRef = useRef<string | null>(null);
 
+  const [debouncedArticle] = useDebounce(article, 1000);
+
+  const mdContentRef = useRef<HTMLTextAreaElement>(null);
+  const richContentRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+
+  const updateArticle = useCallback(
+    <K extends keyof Article>(key: K, value: Article[K]) => {
+      setArticle((prev) => (prev ? { ...prev, [key]: value } : prev));
+    },
+    [],
+  );
+
+  const renderMarkdown = useCallback((content: string) => {
+    return (
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeRaw]}
+        components={{
+          img: ({ ...props }) => (
+            <img
+              {...props}
+              className="max-w-full h-auto my-4 rounded-lg shadow-md"
+            />
+          ),
+          a: ({ ...props }) => (
+            <a
+              {...props}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline"
+            />
+          ),
+          code: ({ inline, ...props }) =>
+            inline ? (
+              <code
+                {...props}
+                className="bg-gray-100 px-1 py-0.5 rounded text-sm"
+              />
+            ) : (
+              <pre className="bg-gray-800 text-white p-4 rounded-lg overflow-x-auto my-4">
+                <code {...props} />
+              </pre>
+            ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    );
+  }, []);
+
+  //自动保存到本地
+  useEffect(() => {
+    if (debouncedArticle) {
+      chrome.storage.local
+        .set({
+          draftArticle: debouncedArticle,
+          lastSaved: Date.now(),
+        })
+        .catch((e) => logger.error("Failed to save draft:", e));
+    }
+  }, [debouncedArticle]);
   // 保持 ref 与 state 同步
   useEffect(() => {
     currentSyncIdRef.current = currentSyncId;
   }, [currentSyncId]);
 
+  //refs 用于获取输入框的值
   const titleRef = useRef<HTMLHeadingElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
+  const authorRef = useRef<HTMLInputElement>(null);
+  const summaryRef = useRef<HTMLTextAreaElement>(null);
+  const tagsRef = useRef<HTMLInputElement>(null);
+  const categoryRef = useRef<HTMLSelectElement>(null);
+  const publishDateRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 接收来自父窗口的消息
   useEffect(() => {
@@ -90,7 +167,7 @@ export function EditorApp() {
       try {
         const data =
           typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-
+        console.log("[Editor] Received message:", data);
         // 如果消息带有 syncId，需要匹配当前的 syncId
         if (data.syncId) {
           // 如果当前没有 syncId，保存这个 syncId（新同步开始）
@@ -111,11 +188,22 @@ export function EditorApp() {
         logger.debug("Received message:", data);
 
         if (data.type === "ARTICLE_DATA") {
-          setArticle(data.article);
+          setArticle({
+            title: data.article.title || "",
+            author: data.article.author || "",
+            summary: data.article.summary || "",
+            content: data.article.content || "",
+            cover: data.article.cover || "",
+            tags: data.article.tags || [],
+            category: data.article.category || "",
+            publishDate: data.article.publishedAt || "",
+          });
           // 设置初始内容
-          if (contentRef.current && data.article.content) {
-            contentRef.current.innerHTML = data.article.content;
-          }
+          // if (contentRef.current && data.article.content) {
+          //   contentRef.current.innerHTML = data.article.content;
+          // }
+        } else if (data.type === "LOAD_DRAFT") {
+          loadDraft();
         } else if (data.type === "PLATFORMS_DATA") {
           setPlatforms(data.platforms);
           // 使用传递的已选中平台，如果没有则从 storage 读取
@@ -206,10 +294,71 @@ export function EditorApp() {
     return () => window.removeEventListener("message", handleMessage);
   }, []);
 
-  // 关闭编辑器
-  const handleClose = useCallback(() => {
-    window.parent.postMessage(JSON.stringify({ type: "CLOSE_EDITOR" }), "*");
-  }, []);
+  // 加载草稿
+  const loadDraft = async () => {
+    try {
+      const result = await chrome.storage.local.get([
+        "draftArticle",
+        "lastSaved",
+      ]);
+      if (result.draftArticle) {
+        const draft = result.draftArticle;
+        const lastSaved = result.lastSaved
+          ? new Date(result.lastSaved).toLocaleString()
+          : "未知";
+
+        if (
+          confirm(`检测到上次编辑的草稿 (保存时间: ${lastSaved})，是否加载？`)
+        ) {
+          const normalizedDraft: Article = {
+            title: draft.title || "",
+            author: draft.author || "",
+            summary: draft.summary || "",
+            content: draft.content || "",
+            cover: draft.cover || "",
+            url: draft.url || "",
+            tags: Array.isArray(draft.tags) ? draft.tags : [],
+            category: draft.category || "",
+            publishDate: draft.publishDate || draft.publishedAt || "",
+          };
+          setArticle(normalizedDraft);
+        }
+      }
+    } catch (e) {
+      logger.error("Failed to load draft:", e);
+    }
+  };
+
+  //加载选中平台
+  const loadSelectedPlatforms = async (platformsList: Platform[]) => {
+    try {
+      const result = await chrome.storage.local.get(SELECTED_PLATFORMS_KEY);
+      const storedPlatforms = result[SELECTED_PLATFORMS_KEY] as
+        | string[]
+        | undefined;
+
+      const authenticated = platformsList.filter((p) => p.isAuthenticated);
+      const authenticatedIds = authenticated.map((p) => p.id);
+      const authenticatedSet = new Set(authenticatedIds);
+
+      let selected: string[];
+      if (storedPlatforms && storedPlatforms.length > 0) {
+        selected = storedPlatforms.filter((id) => authenticatedSet.has(id));
+      } else {
+        selected = authenticatedIds;
+      }
+
+      if (selected.length === 0) {
+        selected = authenticatedIds;
+      }
+
+      setSelectedPlatforms(new Set(selected));
+    } catch (e) {
+      logger.error("Failed to load selected platforms:", e);
+      const authenticated = platformsList.filter((p) => p.isAuthenticated);
+      setSelectedPlatforms(new Set(authenticated.map((p) => p.id)));
+    }
+  };
 
   // 切换平台选中状态
   const togglePlatform = (id: string) => {
@@ -226,15 +375,25 @@ export function EditorApp() {
     });
   };
 
+  // 关闭编辑器
+  const handleClose = useCallback(() => {
+    window.parent.postMessage(JSON.stringify({ type: "CLOSE_EDITOR" }), "*");
+  }, []);
   // 开始同步
   const handleSync = () => {
     if (!article || selectedPlatforms.size === 0) return;
 
-    // 获取编辑后的内容
+    const editedTitle = isMDMode
+      ? article.title
+      : titleRef.current?.innerText || article.title;
+    const editedContent = isMDMode
+      ? (mdContentRef.current?.value ?? article.content)
+      : (richContentRef.current?.innerHTML ?? article.content);
+
     const editedArticle = {
       ...article,
-      title: titleRef.current?.innerText || article.title,
-      content: contentRef.current?.innerHTML || article.content,
+      title: editedTitle,
+      content: editedContent,
     };
 
     // 生成 syncId（在发送消息前设置，以便立即过滤消息）
@@ -265,10 +424,17 @@ export function EditorApp() {
       .map((r) => r.platform);
     if (failedPlatforms.length === 0) return;
 
+    const editedTitle = isMDMode
+      ? article!.title
+      : titleRef.current?.innerText || article!.title;
+    const editedContent = isMDMode
+      ? (mdContentRef.current?.value ?? article!.content)
+      : (richContentRef.current?.innerHTML ?? article!.content);
+
     const editedArticle = {
       ...article!,
-      title: titleRef.current?.innerText || article!.title,
-      content: contentRef.current?.innerHTML || article!.content,
+      title: editedTitle,
+      content: editedContent,
     };
 
     // 生成新的 syncId
@@ -295,8 +461,22 @@ export function EditorApp() {
     console.log("删除封面");
   };
 
-  const handleCoverUpload = () => {
+  const handleCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     console.log("上传封面");
+    const file = e.target.files?.[0];
+    if (!file || !article) return;
+
+    try {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setArticle({ ...article, cover: reader.result as string });
+      };
+      reader.readAsDataURL(file);
+      // 这里可以添加上传到图床的逻辑
+    } catch (error) {
+      logger.error("Failed to upload cover:", error);
+      setError("封面上传失败");
+    }
   };
 
   const authenticatedPlatforms = platforms.filter((p) => p.isAuthenticated);
@@ -328,6 +508,62 @@ export function EditorApp() {
             <span className="font-medium text-gray-700">
               同步助手 - 编辑模式
             </span>
+
+            {/* 编辑器模式切换 */}
+            <div className="flex items-center gap-2 ml-4 border-l pl-4">
+              <button
+                onClick={() => setIsMDMode(false)}
+                className={cn(
+                  "px-3 py-1 rounded text-sm transition-colors",
+                  !isMDMode
+                    ? "bg-blue-500 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200",
+                )}
+              >
+                富文本
+              </button>
+              <button
+                onClick={() => setIsMDMode(true)}
+                className={cn(
+                  "px-3 py-1 rounded text-sm transition-colors",
+                  isMDMode
+                    ? "bg-blue-500 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200",
+                )}
+              >
+                Markdown
+              </button>
+            </div>
+
+            {/* 预览切换（仅 MD 模式） */}
+            {isMDMode && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setEditorMode("edit")}
+                  className={cn(
+                    "p-2 rounded transition-colors",
+                    editorMode === "edit"
+                      ? "bg-blue-100 text-blue-600"
+                      : "text-gray-500 hover:bg-gray-100",
+                  )}
+                  title="编辑模式"
+                >
+                  <Edit2 className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setEditorMode("preview")}
+                  className={cn(
+                    "p-2 rounded transition-colors",
+                    editorMode === "preview"
+                      ? "bg-blue-100 text-blue-600"
+                      : "text-gray-500 hover:bg-gray-100",
+                  )}
+                  title="预览模式"
+                >
+                  <Eye className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -405,7 +641,6 @@ export function EditorApp() {
         {/* 平台选择栏 */}
         <div className="px-6 py-2 border-t bg-gray-50 flex items-center gap-2 overflow-x-auto">
           <span className="text-sm text-gray-500 flex-shrink-0">选择平台:</span>
-          {/* 全选/全不选按钮 */}
           <div className="flex items-center gap-1 flex-shrink-0 mr-2">
             <button
               onClick={() => {
@@ -432,7 +667,6 @@ export function EditorApp() {
           {authenticatedPlatforms.map((platform) => {
             const isSelected = selectedPlatforms.has(platform.id);
             const result = results.find((r) => r.platform === platform.id);
-
             return (
               <button
                 key={platform.id}
@@ -476,111 +710,353 @@ export function EditorApp() {
         </div>
       )}
 
-      {/* 文章内容区 */}
-      <main className="pt-28 pb-16">
-        <article
-          className="w-full max-w-4xl mx-auto bg-white shadow-sm px-12 py-10"
-          style={{ minHeight: "calc(100vh - 7rem)" }}
-        >
-          {/* 封面图 */}
+      {/* 文章编辑区 */}
+      <main className="pt-32 pb-16 px-6">
+        <div className="w-full max-w-4xl mx-auto bg-white shadow-sm rounded-lg p-8">
+          {/* 封面图区域 */}
           <div className="mb-8">
             <label className="block text-gray-700 font-medium mb-2">
-              文章封面
+              文章封面{" "}
+              <span className="text-sm text-gray-400 font-normal">
+                (推荐尺寸: 1200x630)
+              </span>
             </label>
-            <div className="relative">
+            <div className="relative border-2 border-dashed border-gray-300 rounded-lg hover:border-gray-400 transition-colors">
               {article.cover ? (
-                // 已有封面图时显示预览 + 移除按钮
-                <>
+                <div className="relative group">
                   <img
                     src={article.cover}
                     alt="封面预览"
-                    className="w-full max-h-80 object-cover"
+                    className="w-full max-h-80 object-cover rounded-lg"
                   />
-                  <button
-                    onClick={() => handleRemoveCover()}
-                    className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-8 h-8 flex items-center justify-center cursor-pointer"
-                  >
-                    ×
-                  </button>
-                </>
+                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="bg-white text-gray-700 px-4 py-2 rounded-lg shadow-lg hover:bg-gray-50 mr-2"
+                    >
+                      更换图片
+                    </button>
+                    <button
+                      onClick={() => updateArticle("cover", "")}
+                      className="bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg hover:bg-red-600"
+                    >
+                      移除
+                    </button>
+                  </div>
+                </div>
               ) : (
-                // 无封面图时显示上传提示
-                <div className="w-full h-40 flex flex-col items-center justify-center text-gray-400">
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full h-48 flex flex-col items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-50 transition-colors"
+                >
                   <svg
                     className="w-12 h-12 mb-2"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
-                    xmlns="http://www.w3.org/2000/svg"
                   >
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       strokeWidth={2}
-                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                      d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
                     />
                   </svg>
-                  <span>点击或拖拽上传封面图</span>
+                  <span className="text-sm">点击上传封面图</span>
+                  <span className="text-xs text-gray-300 mt-1">
+                    支持 JPG、PNG、GIF
+                  </span>
                 </div>
               )}
-              {/* 隐藏的文件上传输入框 */}
               <input
+                ref={fileInputRef}
                 type="file"
                 accept="image/*"
                 onChange={handleCoverUpload}
-                className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer"
+                className="hidden"
               />
             </div>
           </div>
 
-          {/* 标题 - 可编辑 */}
-          <h1
-            ref={titleRef}
-            contentEditable
-            suppressContentEditableWarning
-            className="text-3xl font-bold text-gray-900 mb-8 outline-none focus:bg-blue-50 rounded px-2 -mx-2 leading-tight"
-          >
-            {article.title}
-          </h1>
+          {/* 标题 */}
+          <div className="mb-6">
+            <label className="block text-gray-700 font-medium mb-2">
+              标题 <span className="text-red-500">*</span>
+            </label>
+            <h1
+              ref={titleRef}
+              contentEditable={!isMDMode}
+              suppressContentEditableWarning
+              onBlur={(e) => updateArticle("title", e.currentTarget.innerText)}
+              className={cn(
+                "w-full text-3xl font-bold text-gray-900 outline-none rounded px-3 py-2 leading-tight",
+                !isMDMode
+                  ? "border focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                  : "bg-gray-50",
+              )}
+              style={{ minHeight: "3.5rem" }}
+            >
+              {article.title}
+            </h1>
+            {isMDMode && (
+              <input
+                type="text"
+                value={article.title}
+                onChange={(e) => updateArticle("title", e.target.value)}
+                placeholder="输入文章标题"
+                className="w-full text-3xl font-bold text-gray-900 outline-none rounded px-3 py-2 leading-tight border focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+              />
+            )}
+          </div>
 
-          {/* 内容 - 可编辑 */}
-          <div
-            ref={contentRef}
-            contentEditable
-            suppressContentEditableWarning
-            className="outline-none focus:bg-blue-50/50 rounded article-content"
-            style={{
-              fontSize: "16px",
-              lineHeight: "1.8",
-              color: "#333",
-            }}
-            dangerouslySetInnerHTML={{ __html: article.content }}
-          />
-          <style>{`
-            .article-content p { margin-bottom: 1em; }
-            .article-content h1 { font-size: 2em; font-weight: bold; margin: 1em 0 0.5em; }
-            .article-content h2 { font-size: 1.5em; font-weight: bold; margin: 1em 0 0.5em; }
-            .article-content h3 { font-size: 1.25em; font-weight: 600; margin: 0.8em 0 0.4em; }
-            .article-content img { max-width: 100%; height: auto; margin: 1em 0; display: block; }
-            .article-content pre { background: #f5f5f5; padding: 1em; border-radius: 6px; overflow-x: auto; margin: 1em 0; font-size: 14px; }
-            .article-content code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
-            .article-content pre code { background: none; padding: 0; }
-            .article-content blockquote { border-left: 4px solid #ddd; padding-left: 1em; margin: 1em 0; color: #666; font-style: italic; }
-            .article-content ul { list-style: disc; padding-left: 2em; margin: 1em 0; }
-            .article-content ol { list-style: decimal; padding-left: 2em; margin: 1em 0; }
-            .article-content li { margin-bottom: 0.5em; }
-            .article-content a { color: #2563eb; text-decoration: underline; }
-            .article-content table { border-collapse: collapse; width: 100%; margin: 1em 0; }
-            .article-content th, .article-content td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
-            .article-content th { background: #f5f5f5; font-weight: 600; }
-            .article-content hr { border: none; border-top: 1px solid #ddd; margin: 2em 0; }
-            .article-content strong { font-weight: 600; }
-            .article-content em { font-style: italic; }
-          `}</style>
-        </article>
+          {/* 作者 */}
+          <div className="mb-6">
+            <label className="block text-gray-700 font-medium mb-2">作者</label>
+            <input
+              ref={authorRef}
+              type="text"
+              value={article.author}
+              onChange={(e) => updateArticle("author", e.target.value)}
+              placeholder="输入作者名"
+              className="w-full px-3 py-2 border rounded-lg focus:border-blue-300 focus:ring-2 focus:ring-blue-100 outline-none"
+            />
+          </div>
+
+          {/* 摘要 */}
+          <div className="mb-6">
+            <label className="block text-gray-700 font-medium mb-2">
+              摘要{" "}
+              <span className="text-sm text-gray-400 font-normal">
+                (选填，会显示在文章列表)
+              </span>
+            </label>
+            <textarea
+              ref={summaryRef}
+              value={article.summary}
+              onChange={(e) => updateArticle("summary", e.target.value)}
+              placeholder="输入文章摘要..."
+              rows={3}
+              className="w-full px-3 py-2 border rounded-lg focus:border-blue-300 focus:ring-2 focus:ring-blue-100 outline-none resize-none"
+            />
+          </div>
+
+          {/* 标签 */}
+          <div className="mb-6">
+            <label className="block text-gray-700 font-medium mb-2">标签</label>
+            <input
+              ref={tagsRef}
+              type="text"
+              value={article.tags?.join(", ")}
+              onChange={(e) =>
+                updateArticle(
+                  "tags",
+                  e.target.value
+                    .split(",")
+                    .map((t) => t.trim())
+                    .filter((t) => t),
+                )
+              }
+              placeholder="多个标签用逗号分隔"
+              className="w-full px-3 py-2 border rounded-lg focus:border-blue-300 focus:ring-2 focus:ring-blue-100 outline-none"
+            />
+          </div>
+
+          {/* 内容区域 */}
+          <div className="mb-6">
+            <label className="block text-gray-700 font-medium mb-2">
+              内容 <span className="text-red-500">*</span>
+            </label>
+
+            {isMDMode ? (
+              // Markdown 模式
+              <div className="border rounded-lg overflow-hidden">
+                {/* 工具栏 */}
+                <div className="bg-gray-50 border-b px-3 py-2 flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const textarea = mdContentRef.current;
+                      if (!textarea) return;
+                      const start = textarea.selectionStart;
+                      const end = textarea.selectionEnd;
+                      const text = textarea.value;
+                      const newText =
+                        text.substring(0, start) +
+                        "**" +
+                        text.substring(start, end) +
+                        "**" +
+                        text.substring(end);
+                      updateArticle("content", newText);
+                      setTimeout(() => textarea.focus(), 0);
+                    }}
+                    className="p-1.5 rounded hover:bg-gray-200 text-sm font-bold"
+                    title="加粗"
+                  >
+                    B
+                  </button>
+                  <button
+                    onClick={() => {
+                      const textarea = mdContentRef.current;
+                      if (!textarea) return;
+                      const start = textarea.selectionStart;
+                      const end = textarea.selectionEnd;
+                      const text = textarea.value;
+                      const newText =
+                        text.substring(0, start) +
+                        "*" +
+                        text.substring(start, end) +
+                        "*" +
+                        text.substring(end);
+                      updateArticle("content", newText);
+                    }}
+                    className="p-1.5 rounded hover:bg-gray-200 text-sm italic"
+                    title="斜体"
+                  >
+                    I
+                  </button>
+                  <button
+                    onClick={() => {
+                      const textarea = mdContentRef.current;
+                      if (!textarea) return;
+                      const start = textarea.selectionStart;
+                      const end = textarea.selectionEnd;
+                      const text = textarea.value;
+                      const newText =
+                        text.substring(0, start) +
+                        "#" +
+                        text.substring(start, end) +
+                        text.substring(end);
+                      updateArticle("content", newText);
+                    }}
+                    className="p-1.5 rounded hover:bg-gray-200 text-sm"
+                    title="标题"
+                  >
+                    H1
+                  </button>
+                  <div className="w-px h-4 bg-gray-300 mx-1" />
+                  <button
+                    onClick={() =>
+                      updateArticle("content", article.content + "\n- ")
+                    }
+                    className="p-1.5 rounded hover:bg-gray-200 text-sm"
+                    title="列表"
+                  >
+                    •
+                  </button>
+                  <button
+                    onClick={() =>
+                      updateArticle("content", article.content + "\n1. ")
+                    }
+                    className="p-1.5 rounded hover:bg-gray-200 text-sm"
+                    title="数字列表"
+                  >
+                    1.
+                  </button>
+                  <button
+                    onClick={() =>
+                      updateArticle("content", article.content + "\n> ")
+                    }
+                    className="p-1.5 rounded hover:bg-gray-200 text-sm"
+                    title="引用"
+                  >
+                    "
+                  </button>
+                  <button
+                    onClick={() =>
+                      updateArticle("content", article.content + "\n```\n\n```")
+                    }
+                    className="p-1.5 rounded hover:bg-gray-200 text-sm"
+                    title="代码块"
+                  >
+                    {"<>"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const url = prompt("输入图片URL:");
+                      if (url)
+                        updateArticle(
+                          "content",
+                          article.content + `\n![图片](${url})`,
+                        );
+                    }}
+                    className="p-1.5 rounded hover:bg-gray-200 text-sm"
+                    title="图片"
+                  >
+                    🖼️
+                  </button>
+                  <button
+                    onClick={() => {
+                      const url = prompt("输入链接URL:");
+                      if (url) {
+                        const text = prompt("输入链接文字:") || url;
+                        updateArticle(
+                          "content",
+                          article.content + `[${text}](${url})`,
+                        );
+                      }
+                    }}
+                    className="p-1.5 rounded hover:bg-gray-200 text-sm"
+                    title="链接"
+                  >
+                    🔗
+                  </button>
+                </div>
+
+                {/* 编辑/预览区域 */}
+                {editorMode === "edit" ? (
+                  <textarea
+                    ref={mdContentRef}
+                    value={article.content}
+                    onChange={(e) => updateArticle("content", e.target.value)}
+                    placeholder="使用 Markdown 编写文章..."
+                    rows={20}
+                    className="w-full px-4 py-3 outline-none font-mono text-sm resize-none"
+                    style={{ lineHeight: 1.6 }}
+                  />
+                ) : (
+                  <div
+                    ref={previewRef}
+                    className="prose max-w-none p-6 min-h-[400px] bg-white"
+                  >
+                    {renderMarkdown(article.content)}
+                  </div>
+                )}
+              </div>
+            ) : (
+              // 富文本模式
+              <div
+                ref={richContentRef}
+                contentEditable
+                suppressContentEditableWarning
+                onBlur={(e) =>
+                  updateArticle("content", e.currentTarget.innerHTML)
+                }
+                className="outline-none border rounded-lg p-4 min-h-[400px] focus:border-blue-300 focus:ring-2 focus:ring-blue-100 article-content"
+                style={{
+                  fontSize: "16px",
+                  lineHeight: "1.8",
+                  color: "#333",
+                }}
+                dangerouslySetInnerHTML={{ __html: article.content }}
+              />
+            )}
+          </div>
+
+          {/* 元信息 */}
+          <div className="text-xs text-gray-400 flex items-center justify-between mt-4 pt-4 border-t">
+            <span>
+              {article.publishDate
+                ? `发布于: ${new Date(article.publishDate).toLocaleString()}`
+                : "未发布"}
+            </span>
+            <span>
+              字数: {article.content.length} | 预估阅读时间:{" "}
+              {Math.ceil(article.content.length / 500)} 分钟
+            </span>
+          </div>
+        </div>
       </main>
 
-      {/* 同步进度/结果浮窗 */}
+      {/* 同步进度浮窗 */}
       {(status === "syncing" || results.length > 0) && (
         <div className="fixed bottom-4 right-4 bg-white rounded-lg shadow-lg border p-4 w-80 max-h-80 overflow-y-auto z-50">
           <h3 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
@@ -598,7 +1074,6 @@ export function EditorApp() {
               const result = results.find((r) => r.platform === platformId);
               const progress = platformProgress.get(platformId);
 
-              // 获取阶段文本
               const getStageText = (p: PlatformProgress) => {
                 switch (p.stage) {
                   case "starting":
@@ -619,7 +1094,6 @@ export function EditorApp() {
               };
 
               if (result) {
-                // 已完成
                 return (
                   <div
                     key={platformId}
@@ -656,7 +1130,6 @@ export function EditorApp() {
               }
 
               if (progress) {
-                // 进行中
                 return (
                   <div
                     key={platformId}
@@ -673,7 +1146,6 @@ export function EditorApp() {
                 );
               }
 
-              // 等待中
               return (
                 <div
                   key={platformId}
