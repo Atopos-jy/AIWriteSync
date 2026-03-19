@@ -118,7 +118,13 @@ export function EditorApp() {
               className="text-blue-600 hover:underline"
             />
           ),
-          code: ({ inline, ...props }) =>
+          code: ({
+            inline,
+            ...props
+          }: {
+            inline?: boolean;
+            [key: string]: any;
+          }) =>
             inline ? (
               <code
                 {...props}
