@@ -6,6 +6,8 @@ import rehypeRaw from "rehype-raw";
 import { cn } from "@/lib/utils";
 import { createLogger } from "../lib/logger";
 import { useDebounce } from "use-debounce";
+import { htmlToMarkdownNative } from "@wechatsync/core";
+import { marked } from "marked";
 const logger = createLogger("Editor");
 
 interface Article {
@@ -17,6 +19,7 @@ interface Article {
   url?: string;
   tags?: string[];
   category?: string;
+  articleType?: string;
   publishDate?: string;
 }
 
@@ -67,6 +70,40 @@ function saveSelectedPlatforms(platformIds: string[]) {
     });
 }
 
+// 富文本操作工具函数（核心：处理加粗/斜体/标题等富文本格式）
+const execCommand = (command: string, value?: string) => {
+  document.execCommand(command, false, value);
+};
+
+// 插入图片到富文本
+const insertImageToRichText = (
+  richContentRef: React.RefObject<HTMLDivElement>,
+) => {
+  const url = prompt("输入图片URL:");
+  if (url && richContentRef.current) {
+    const img = document.createElement("img");
+    img.src = url;
+    img.style.maxWidth = "100%";
+    img.style.margin = "10px 0";
+    richContentRef.current.appendChild(img);
+  }
+};
+
+// 插入链接到富文本
+const insertLinkToRichText = (
+  richContentRef: React.RefObject<HTMLDivElement>,
+) => {
+  const url = prompt("输入链接URL:");
+  if (url && richContentRef.current) {
+    const text = prompt("输入链接文字:") || "链接";
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.textContent = text;
+    a.style.color = "#007fff";
+    richContentRef.current.appendChild(a);
+  }
+};
 export function EditorApp() {
   const [article, setArticle] = useState<Article | null>(null);
   const [editorMode, setEditorMode] = useState<"preview" | "edit">("preview");
@@ -96,6 +133,35 @@ export function EditorApp() {
       setArticle((prev) => (prev ? { ...prev, [key]: value } : prev));
     },
     [],
+  );
+
+  // B 方案：仅存 article.content，切换模式时做一次 HTML↔Markdown 转换
+  const switchEditorMode = useCallback(
+    (nextIsMDMode: boolean) => {
+      if (!article) {
+        setIsMDMode(nextIsMDMode);
+        if (nextIsMDMode) setEditorMode("edit");
+        return;
+      }
+      if (nextIsMDMode === isMDMode) return;
+
+      if (nextIsMDMode) {
+        // 富文本 -> Markdown（优先取 contentEditable 的最新 HTML）
+        const html = richContentRef.current?.innerHTML ?? article.content ?? "";
+        const md = htmlToMarkdownNative(html);
+        setArticle((prev) => (prev ? { ...prev, content: md } : prev));
+        setIsMDMode(true);
+        setEditorMode("edit");
+        return;
+      }
+
+      // Markdown -> 富文本（优先取 textarea 的最新值）
+      const md = mdContentRef.current?.value ?? article.content ?? "";
+      const html = marked.parse(md) as string;
+      setArticle((prev) => (prev ? { ...prev, content: html } : prev));
+      setIsMDMode(false);
+    },
+    [article, isMDMode],
   );
 
   const renderMarkdown = useCallback((content: string) => {
@@ -164,6 +230,7 @@ export function EditorApp() {
   const summaryRef = useRef<HTMLTextAreaElement>(null);
   const tagsRef = useRef<HTMLInputElement>(null);
   const categoryRef = useRef<HTMLSelectElement>(null);
+  const articleTypeRef = useRef<HTMLSelectElement>(null);
   const publishDateRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -194,15 +261,25 @@ export function EditorApp() {
         logger.debug("Received message:", data);
 
         if (data.type === "ARTICLE_DATA") {
+          let content = data.article.content || "";
+          // 如果提供了 html 和 markdown，根据当前模式选择
+          if (data.article.html && data.article.markdown) {
+            content = isMDMode ? data.article.markdown : data.article.html;
+          } else if (data.article.html && isMDMode) {
+            content = htmlToMarkdownNative(data.article.html);
+          } else if (data.article.markdown && !isMDMode) {
+            content = marked.parse(data.article.markdown) as string;
+          }
           setArticle({
             title: data.article.title || "",
             author: data.article.author || "",
             summary: data.article.summary || "",
-            content: data.article.content || "",
+            content,
             cover: data.article.cover || "",
             tags: data.article.tags || [],
             category: data.article.category || "",
-            publishDate: data.article.publishedAt || "",
+            articleType: data.article.articleType || "",
+            publishDate: data.article.publishDate || data.article.publishedAt || "",
           });
           // 设置初始内容
           // if (contentRef.current && data.article.content) {
@@ -325,6 +402,7 @@ export function EditorApp() {
             url: draft.url || "",
             tags: Array.isArray(draft.tags) ? draft.tags : [],
             category: draft.category || "",
+            articleType: draft.articleType || "",
             publishDate: draft.publishDate || draft.publishedAt || "",
           };
           setArticle(normalizedDraft);
@@ -501,7 +579,7 @@ export function EditorApp() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 mb-8">
       {/* 顶部工具栏 */}
       <header className="fixed top-0 left-0 right-0 bg-white border-b shadow-sm z-50">
         <div className="px-6 py-3 flex items-center justify-between">
@@ -518,7 +596,7 @@ export function EditorApp() {
             {/* 编辑器模式切换 */}
             <div className="flex items-center gap-2 ml-4 border-l pl-4">
               <button
-                onClick={() => setIsMDMode(false)}
+                onClick={() => switchEditorMode(false)}
                 className={cn(
                   "px-3 py-1 rounded text-sm transition-colors",
                   !isMDMode
@@ -529,7 +607,7 @@ export function EditorApp() {
                 富文本
               </button>
               <button
-                onClick={() => setIsMDMode(true)}
+                onClick={() => switchEditorMode(true)}
                 className={cn(
                   "px-3 py-1 rounded text-sm transition-colors",
                   isMDMode
@@ -572,6 +650,7 @@ export function EditorApp() {
             )}
           </div>
 
+          {/* 同步按钮 */}
           <div className="flex items-center gap-2">
             {status === "idle" && (
               <button
@@ -643,7 +722,6 @@ export function EditorApp() {
             </button>
           </div>
         </div>
-
         {/* 平台选择栏 */}
         <div className="px-6 py-2 border-t bg-gray-50 flex items-center gap-2 overflow-x-auto">
           <span className="text-sm text-gray-500 flex-shrink-0">选择平台:</span>
@@ -698,6 +776,106 @@ export function EditorApp() {
             );
           })}
         </div>
+        {/* 工具栏 */}
+        <div className="px-6 py-1 bg-gray-50 border-t flex items-center gap-1 overflow-x-auto">
+          {/* 基础格式 */}
+          <button
+            onClick={() => execCommand("bold")}
+            className="p-1.5 rounded hover:bg-gray-200 text-sm font-bold"
+            title="加粗"
+          >
+            B
+          </button>
+          <button
+            onClick={() => execCommand("italic")}
+            className="p-1.5 rounded hover:bg-gray-200 text-sm italic"
+            title="斜体"
+          >
+            I
+          </button>
+          <button
+            onClick={() => execCommand("underline")}
+            className="p-1.5 rounded hover:bg-gray-200 text-sm"
+            title="下划线"
+          >
+            U
+          </button>
+          <button
+            onClick={() => execCommand("strikeThrough")}
+            className="p-1.5 rounded hover:bg-gray-200 text-sm"
+            title="删除线"
+          >
+            S
+          </button>
+          <div className="w-px h-4 bg-gray-300 mx-1" />
+
+          {/* 标题 */}
+          <select
+            onChange={(e) => execCommand("formatBlock", e.target.value)}
+            className="p-1 rounded border border-gray-200 bg-white text-sm focus:outline-none"
+            title="标题级别"
+          >
+            <option value="<p>">正文</option>
+            <option value="<h1>">标题1</option>
+            <option value="<h2>">标题2</option>
+            <option value="<h3>">标题3</option>
+          </select>
+          <div className="w-px h-4 bg-gray-300 mx-1" />
+
+          {/* 列表 */}
+          <button
+            onClick={() => execCommand("insertUnorderedList")}
+            className="p-1.5 rounded hover:bg-gray-200 text-sm"
+            title="无序列表"
+          >
+            •
+          </button>
+          <button
+            onClick={() => execCommand("insertOrderedList")}
+            className="p-1.5 rounded hover:bg-gray-200 text-sm"
+            title="有序列表"
+          >
+            1.
+          </button>
+          <button
+            onClick={() => execCommand("indent")}
+            className="p-1.5 rounded hover:bg-gray-200 text-sm"
+            title="增加缩进"
+          >
+            →
+          </button>
+          <button
+            onClick={() => execCommand("outdent")}
+            className="p-1.5 rounded hover:bg-gray-200 text-sm"
+            title="减少缩进"
+          >
+            ←
+          </button>
+          <div className="w-px h-4 bg-gray-300 mx-1" />
+
+          {/* 插入内容 */}
+          <button
+            onClick={() => insertLinkToRichText(richContentRef)}
+            className="p-1.5 rounded hover:bg-gray-200 text-sm"
+            title="插入链接"
+          >
+            🔗
+          </button>
+          <button
+            onClick={() => insertImageToRichText(richContentRef)}
+            className="p-1.5 rounded hover:bg-gray-200 text-sm"
+            title="插入图片"
+          >
+            🖼️
+          </button>
+          <button
+            onClick={() => execCommand("insertHorizontalRule")}
+            className="p-1.5 rounded hover:bg-gray-200 text-sm"
+            title="分隔线"
+          >
+            ━
+          </button>
+        </div>
       </header>
 
       {/* 频率限制警告 */}
@@ -717,318 +895,86 @@ export function EditorApp() {
       )}
 
       {/* 文章编辑区 */}
-      <main className="pt-32 pb-16 px-6">
-        <div className="w-full max-w-4xl mx-auto bg-white shadow-sm rounded-lg p-8">
-          {/* 封面图区域 */}
-          <div className="mb-8">
-            <label className="block text-gray-700 font-medium mb-2">
-              文章封面{" "}
-              <span className="text-sm text-gray-400 font-normal">
-                (推荐尺寸: 1200x630)
-              </span>
-            </label>
-            <div className="relative border-2 border-dashed border-gray-300 rounded-lg hover:border-gray-400 transition-colors">
-              {article.cover ? (
-                <div className="relative group">
-                  <img
-                    src={article.cover}
-                    alt="封面预览"
-                    className="w-full max-h-80 object-cover rounded-lg"
-                  />
-                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="bg-white text-gray-700 px-4 py-2 rounded-lg shadow-lg hover:bg-gray-50 mr-2"
-                    >
-                      更换图片
-                    </button>
-                    <button
-                      onClick={() => updateArticle("cover", "")}
-                      className="bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg hover:bg-red-600"
-                    >
-                      移除
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full h-48 flex flex-col items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-50 transition-colors"
-                >
-                  <svg
-                    className="w-12 h-12 mb-2"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                    />
-                  </svg>
-                  <span className="text-sm">点击上传封面图</span>
-                  <span className="text-xs text-gray-300 mt-1">
-                    支持 JPG、PNG、GIF
-                  </span>
-                </div>
+      <main className="mb-8 pt-32 px-6 bg-gray-50 min-h-screen">
+        <div className="w-full max-w-4xl mx-auto bg-white rounded-lg p-12 shadow-none">
+          {/* 标题区域 */}
+          <div className="text-left">
+            <div
+              ref={titleRef}
+              contentEditable
+              suppressContentEditableWarning
+              onBlur={(e) =>
+                updateArticle("title", e.currentTarget.innerText.trim())
+              }
+              className="w-full text-4xl font-bold text-gray-800 outline-none leading-tight border-b border-gray-100 placeholder-gray-400"
+              style={{ minHeight: "4rem", lineHeight: 1.4 }}
+              data-placeholder="请输入文章标题（最多64个字）"
+            >
+              {article.title || (
+                <span className="text-gray-300">
+                  请输入文章标题（最多64个字）
+                </span>
               )}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleCoverUpload}
-                className="hidden"
-              />
+            </div>
+            {/* 标题字数提示（公众号风格：右下角小字） */}
+            <div className="text-right text-xs text-gray-400 mt-1">
+              {article.title.length}/64
             </div>
           </div>
 
-          {/* 标题 */}
-          <div className="mb-6">
-            <label className="block text-gray-700 font-medium mb-2">
-              标题 <span className="text-red-500">*</span>
-            </label>
-            <h1
-              ref={titleRef}
-              contentEditable={!isMDMode}
-              suppressContentEditableWarning
-              onBlur={(e) => updateArticle("title", e.currentTarget.innerText)}
-              className={cn(
-                "w-full text-3xl font-bold text-gray-900 outline-none rounded px-3 py-2 leading-tight",
-                !isMDMode
-                  ? "border focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-                  : "bg-gray-50",
-              )}
-              style={{ minHeight: "3.5rem" }}
-            >
-              {article.title}
-            </h1>
-            {isMDMode && (
-              <input
-                type="text"
-                value={article.title}
-                onChange={(e) => updateArticle("title", e.target.value)}
-                placeholder="输入文章标题"
-                className="w-full text-3xl font-bold text-gray-900 outline-none rounded px-3 py-2 leading-tight border focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-              />
-            )}
-          </div>
-
-          {/* 作者 */}
-          <div className="mb-6">
-            <label className="block text-gray-700 font-medium mb-2">作者</label>
-            <input
-              ref={authorRef}
-              type="text"
-              value={article.author}
-              onChange={(e) => updateArticle("author", e.target.value)}
-              placeholder="输入作者名"
-              className="w-full px-3 py-2 border rounded-lg focus:border-blue-300 focus:ring-2 focus:ring-blue-100 outline-none"
-            />
-          </div>
-
-          {/* 摘要 */}
-          <div className="mb-6">
-            <label className="block text-gray-700 font-medium mb-2">
-              摘要{" "}
-              <span className="text-sm text-gray-400 font-normal">
-                (选填，会显示在文章列表)
-              </span>
-            </label>
-            <textarea
-              ref={summaryRef}
-              value={article.summary}
-              onChange={(e) => updateArticle("summary", e.target.value)}
-              placeholder="输入文章摘要..."
-              rows={3}
-              className="w-full px-3 py-2 border rounded-lg focus:border-blue-300 focus:ring-2 focus:ring-blue-100 outline-none resize-none"
-            />
-          </div>
-
-          {/* 标签 */}
-          <div className="mb-6">
-            <label className="block text-gray-700 font-medium mb-2">标签</label>
-            <input
-              ref={tagsRef}
-              type="text"
-              value={article.tags?.join(", ")}
-              onChange={(e) =>
-                updateArticle(
-                  "tags",
-                  e.target.value
-                    .split(",")
-                    .map((t) => t.trim())
-                    .filter((t) => t),
-                )
-              }
-              placeholder="多个标签用逗号分隔"
-              className="w-full px-3 py-2 border rounded-lg focus:border-blue-300 focus:ring-2 focus:ring-blue-100 outline-none"
-            />
+          {/* 作者/编辑信息栏 */}
+          <div className="mb-5">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500">作者：</span>
+              <div
+                ref={authorRef}
+                contentEditable
+                suppressContentEditableWarning
+                onBlur={(e) =>
+                  updateArticle("author", e.currentTarget.innerText.trim())
+                }
+                className="text-sm text-gray-800 outline-none min-w-[100px] placeholder-gray-400"
+                data-placeholder="请输入作者名"
+              >
+                {article.author || (
+                  <span className="text-gray-500">请输入作者名</span>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* 内容区域 */}
-          <div className="mb-6">
-            <label className="block text-gray-700 font-medium mb-2">
-              内容 <span className="text-red-500">*</span>
-            </label>
-
+          <div className="mb-2">
             {isMDMode ? (
               // Markdown 模式
-              <div className="border rounded-lg overflow-hidden">
-                {/* 工具栏 */}
-                <div className="bg-gray-50 border-b px-3 py-2 flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      const textarea = mdContentRef.current;
-                      if (!textarea) return;
-                      const start = textarea.selectionStart;
-                      const end = textarea.selectionEnd;
-                      const text = textarea.value;
-                      const newText =
-                        text.substring(0, start) +
-                        "**" +
-                        text.substring(start, end) +
-                        "**" +
-                        text.substring(end);
-                      updateArticle("content", newText);
-                      setTimeout(() => textarea.focus(), 0);
-                    }}
-                    className="p-1.5 rounded hover:bg-gray-200 text-sm font-bold"
-                    title="加粗"
-                  >
-                    B
-                  </button>
-                  <button
-                    onClick={() => {
-                      const textarea = mdContentRef.current;
-                      if (!textarea) return;
-                      const start = textarea.selectionStart;
-                      const end = textarea.selectionEnd;
-                      const text = textarea.value;
-                      const newText =
-                        text.substring(0, start) +
-                        "*" +
-                        text.substring(start, end) +
-                        "*" +
-                        text.substring(end);
-                      updateArticle("content", newText);
-                    }}
-                    className="p-1.5 rounded hover:bg-gray-200 text-sm italic"
-                    title="斜体"
-                  >
-                    I
-                  </button>
-                  <button
-                    onClick={() => {
-                      const textarea = mdContentRef.current;
-                      if (!textarea) return;
-                      const start = textarea.selectionStart;
-                      const end = textarea.selectionEnd;
-                      const text = textarea.value;
-                      const newText =
-                        text.substring(0, start) +
-                        "#" +
-                        text.substring(start, end) +
-                        text.substring(end);
-                      updateArticle("content", newText);
-                    }}
-                    className="p-1.5 rounded hover:bg-gray-200 text-sm"
-                    title="标题"
-                  >
-                    H1
-                  </button>
-                  <div className="w-px h-4 bg-gray-300 mx-1" />
-                  <button
-                    onClick={() =>
-                      updateArticle("content", article.content + "\n- ")
-                    }
-                    className="p-1.5 rounded hover:bg-gray-200 text-sm"
-                    title="列表"
-                  >
-                    •
-                  </button>
-                  <button
-                    onClick={() =>
-                      updateArticle("content", article.content + "\n1. ")
-                    }
-                    className="p-1.5 rounded hover:bg-gray-200 text-sm"
-                    title="数字列表"
-                  >
-                    1.
-                  </button>
-                  <button
-                    onClick={() =>
-                      updateArticle("content", article.content + "\n> ")
-                    }
-                    className="p-1.5 rounded hover:bg-gray-200 text-sm"
-                    title="引用"
-                  >
-                    "
-                  </button>
-                  <button
-                    onClick={() =>
-                      updateArticle("content", article.content + "\n```\n\n```")
-                    }
-                    className="p-1.5 rounded hover:bg-gray-200 text-sm"
-                    title="代码块"
-                  >
-                    {"<>"}
-                  </button>
-                  <button
-                    onClick={() => {
-                      const url = prompt("输入图片URL:");
-                      if (url)
-                        updateArticle(
-                          "content",
-                          article.content + `\n![图片](${url})`,
-                        );
-                    }}
-                    className="p-1.5 rounded hover:bg-gray-200 text-sm"
-                    title="图片"
-                  >
-                    🖼️
-                  </button>
-                  <button
-                    onClick={() => {
-                      const url = prompt("输入链接URL:");
-                      if (url) {
-                        const text = prompt("输入链接文字:") || url;
-                        updateArticle(
-                          "content",
-                          article.content + `[${text}](${url})`,
-                        );
-                      }
-                    }}
-                    className="p-1.5 rounded hover:bg-gray-200 text-sm"
-                    title="链接"
-                  >
-                    🔗
-                  </button>
-                </div>
-
+              <div className="rounded-lg overflow-hidden bg-white">
                 {/* 编辑/预览区域 */}
                 {editorMode === "edit" ? (
                   <textarea
                     ref={mdContentRef}
                     value={article.content}
                     onChange={(e) => updateArticle("content", e.target.value)}
-                    placeholder="使用 Markdown 编写文章..."
-                    rows={20}
-                    className="w-full px-4 py-3 outline-none font-mono text-sm resize-none"
-                    style={{ lineHeight: 1.6 }}
+                    placeholder="请在这里编写文章内容（支持Markdown语法）..."
+                    className="w-full outline-none font-sans text-base bg-white resize-y"
+                    style={{
+                      lineHeight: 1.8,
+                      minHeight: "800px",
+                      color: "#333",
+                      fontSize: "16px",
+                    }}
                   />
                 ) : (
                   <div
                     ref={previewRef}
-                    className="prose max-w-none p-6 min-h-[400px] bg-white"
+                    className="prose max-w-none min-h-[800px] bg-white"
+                    style={{ fontSize: "16px", lineHeight: 1.8 }}
                   >
                     {renderMarkdown(article.content)}
                   </div>
                 )}
               </div>
             ) : (
-              // 富文本模式
+              // 富文本模式（完全对标公众号：无框、大块、沉浸式）
               <div
                 ref={richContentRef}
                 contentEditable
@@ -1036,28 +982,20 @@ export function EditorApp() {
                 onBlur={(e) =>
                   updateArticle("content", e.currentTarget.innerHTML)
                 }
-                className="outline-none border rounded-lg p-4 min-h-[400px] focus:border-blue-300 focus:ring-2 focus:ring-blue-100 article-content"
+                className="outline-none rounded-lg min-h-[800px] bg-white"
                 style={{
                   fontSize: "16px",
-                  lineHeight: "1.8",
+                  lineHeight: 1.8,
                   color: "#333",
+                  letterSpacing: "0.5px", // 公众号文字间距
                 }}
-                dangerouslySetInnerHTML={{ __html: article.content }}
+                dangerouslySetInnerHTML={{
+                  __html:
+                    article.content ||
+                    '<div class="text-gray-300">请在这里编写文章内容...</div>',
+                }}
               />
             )}
-          </div>
-
-          {/* 元信息 */}
-          <div className="text-xs text-gray-400 flex items-center justify-between mt-4 pt-4 border-t">
-            <span>
-              {article.publishDate
-                ? `发布于: ${new Date(article.publishDate).toLocaleString()}`
-                : "未发布"}
-            </span>
-            <span>
-              字数: {article.content.length} | 预估阅读时间:{" "}
-              {Math.ceil(article.content.length / 500)} 分钟
-            </span>
           </div>
         </div>
       </main>
@@ -1181,6 +1119,244 @@ export function EditorApp() {
           </button>
         </div>
       )}
+
+      {/* 文章基本信息 */}
+      <div className=" border-t py-8 bg-gray-50 ">
+        <div className="pb-16 max-w-4xl mx-auto bg-white rounded-lg p-12 show-nonw">
+          {/* 封面部分（对标CSDN/公众号，移到元信息区域顶部） */}
+          <div className="mb-6">
+            <label className="block text-gray-700 font-normal mb-2 text-base">
+              文章封面{" "}
+              <span className="text-base text-gray-400">
+                (推荐尺寸: 1200x630，会显示在文章列表)
+              </span>
+            </label>
+            <div className="flex items-start gap-4">
+              {/* 封面上传区域 */}
+              <div className="relative border-2 border-dashed border-gray-300 rounded-lg hover:border-blue-300 transition-colors w-40 h-28 flex items-center justify-center">
+                {article.cover ? (
+                  <div className="relative w-full h-full group">
+                    <img
+                      src={article.cover}
+                      alt="封面预览"
+                      className="w-full h-full object-cover rounded-lg"
+                    />
+                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100 rounded-lg">
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="bg-white text-gray-700 px-2 py-1 rounded text-xs shadow-sm hover:bg-gray-50 mr-1"
+                      >
+                        更换
+                      </button>
+                      <button
+                        onClick={() => updateArticle("cover", "")}
+                        className="bg-red-500 text-white px-2 py-1 rounded text-xs shadow-sm hover:bg-red-600"
+                      >
+                        移除
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full h-full flex flex-col items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-50 transition-colors"
+                  >
+                    <svg
+                      className="w-8 h-8 mb-1"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                      />
+                    </svg>
+                    <span className="text-xs">上传封面</span>
+                  </div>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleCoverUpload}
+                  className="hidden"
+                />
+              </div>
+
+              {/* 封面提示（对标CSDN） */}
+              <div className="flex-1 text-sm text-gray-500">
+                <p>• 封面图会显示在文章列表和分享卡片中</p>
+                <p>• 推荐使用 1200x630 像素的图片，效果最佳</p>
+                <p>• 支持 JPG、PNG 格式，大小不超过 5MB</p>
+              </div>
+            </div>
+          </div>
+
+          {/* 新增：文章摘要模块（对标现有布局） */}
+          <div className="mb-6">
+            <label className="block text-gray-700 font-normal mb-2 text-base">
+              文章摘要
+            </label>
+            <div className="flex flex-col gap-1">
+              <textarea
+                value={article.summary || ""}
+                onChange={(e) => {
+                  // 限制最大输入 256 字
+                  const value = e.target.value.slice(0, 256);
+                  updateArticle("summary", value);
+                }}
+                placeholder="摘要：会在推、列表等场景外露，帮助读者快速了解内容，支持一键将正文前 256 字符键入摘要框"
+                className="px-3 py-2 border border-gray-200 rounded focus:outline-none focus:border-blue-300 resize-none text-sm"
+                rows={3}
+              />
+              <div
+                className="text-right text-gray-400"
+                style={{ fontSize: "15px" }}
+              >
+                {article.summary ? article.summary.length : 0}/256
+              </div>
+            </div>
+          </div>
+
+          {/* 第一行：标签 + 分类专栏（对标CSDN） */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            {/* 文章标签 */}
+            <div>
+              <label className="block text-gray-700 font-normal mb-2 text-base">
+                文章标签{" "}
+                <span className="text-base text-gray-400">
+                  (多个标签用逗号分隔)
+                </span>
+              </label>
+              <div className="flex flex-wrap gap-2 items-center">
+                {/* 已选标签展示（对标CSDN标签样式） */}
+                {article.tags && article.tags.length > 0 ? (
+                  article.tags.map((tag, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center bg-blue-50 text-blue-700 px-2 py-1 rounded-full text-sm"
+                    >
+                      <span>{tag}</span>
+                      <button
+                        onClick={() => {
+                          if (article.tags && article.tags.length > 0) {
+                            updateArticle(
+                              "tags",
+                              article.tags.filter((_, i) => i !== index),
+                            );
+                          }
+                        }}
+                        className="ml-1 text-blue-500 hover:text-blue-700"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <span className="text-gray-400 text-sm">未添加标签</span>
+                )}
+                {/* 添加标签输入框 */}
+                <input
+                  type="text"
+                  placeholder="输入标签后回车添加"
+                  onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                    if (e.key === "Enter" && e.currentTarget.value.trim()) {
+                      updateArticle("tags", [
+                        ...(article.tags || []),
+                        e.currentTarget.value.trim(),
+                      ]);
+                      e.currentTarget.value = "";
+                    }
+                  }}
+                  className="px-2 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:border-blue-300"
+                />
+              </div>
+            </div>
+
+            {/* 分类专栏（对标CSDN） */}
+            <div>
+              <label className="block text-gray-700 font-normal mb-2 text-base">
+                分类专栏
+              </label>
+              <div className="flex items-center gap-2">
+                <select
+                  value={article.category || ""}
+                  onChange={(e) => updateArticle("category", e.target.value)}
+                  className="px-2 py-1 border border-gray-200 rounded text-sm focus:outline-none focus:border-blue-300"
+                >
+                  <option value="">未选择专栏</option>
+                  <option value="技术">技术</option>
+                  <option value="前端">前端</option>
+                  <option value="后端">后端</option>
+                  <option value="人工智能">人工智能</option>
+                </select>
+                <button
+                  onClick={() => {
+                    const newCategory = prompt("输入新专栏名称:");
+                    if (newCategory) updateArticle("category", newCategory);
+                  }}
+                  className="px-2 py-1 border border-gray-200 rounded text-sm bg-gray-50 hover:bg-gray-100"
+                >
+                  + 新建专栏
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 原创声明  */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            {/* 文章类型（原创/转载） */}
+            <div>
+              <label className="block text-gray-700 font-normal mb-2 text-base">
+                文章类型
+              </label>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-1 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="articleType"
+                    value="original"
+                    checked={article.articleType === "original"}
+                    onChange={() => updateArticle("articleType", "original")}
+                    className="cursor-pointer h-4 w-4"
+                  />
+                  <span
+                    className={`text-base ${
+                      article.articleType === "original"
+                        ? "font-bold text-gray-800"
+                        : "text-gray-400"
+                    }`}
+                  >
+                    原创
+                  </span>
+                </label>
+                <label className="flex items-center gap-1 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="articleType"
+                    value="reprint"
+                    checked={article.articleType === "reprint"}
+                    onChange={() => updateArticle("articleType", "reprint")}
+                    className="cursor-pointer h-4 w-4"
+                  />
+                  <span
+                    className={`text-base ${
+                      article.articleType === "reprint"
+                        ? "font-bold text-gray-800"
+                        : "text-gray-400"
+                    }`}
+                  >
+                    转载
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
