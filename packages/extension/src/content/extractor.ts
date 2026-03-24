@@ -22,6 +22,8 @@ const logger = createLogger('Extractor')
 
 interface ExtractedArticle {
   title: string
+  author?: string
+  articleType?: string
   markdown: string   // Markdown 格式（主要）
   html?: string      // 原始 HTML（可选，用于某些平台）
   summary?: string

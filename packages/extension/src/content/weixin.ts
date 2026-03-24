@@ -971,13 +971,35 @@ import {
       document.querySelector(".rich_media_title")?.textContent?.trim();
 
     // 作者
-    const author =
-      document.querySelector(".profile_nickname")?.textContent?.trim() ||
-      document
-        .querySelector(
-          ".rich_media_meta_list .rich_media_meta.rich_media_meta_text",
-        )
-        ?.textContent?.trim();
+    let author = '';
+    const authorSpan = document.querySelector('#js_author_name_text');
+    if (authorSpan) {
+      author = authorSpan.textContent?.trim() || '';
+    }
+    // 备选：从 .rich_media_meta_text 中提取可见文本
+    if (!author) {
+      const authorContainer = document.querySelector('.rich_media_meta_list .rich_media_meta.rich_media_meta_text');
+      if (authorContainer) {
+        // 获取所有非隐藏的直接子节点文本（包括文本节点）
+        const visibleText = Array.from(authorContainer.childNodes)
+          .filter(node => {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              const el = node as HTMLElement;
+              const style = window.getComputedStyle(el);
+              return style.display !== 'none' && style.visibility !== 'hidden';
+            }
+            return true;
+          })
+          .map(node => node.textContent?.trim() || '')
+          .join('')
+          .trim();
+        author = visibleText;
+      }
+    }
+    // 最终回退：.profile_nickname
+    if (!author) {
+      author = document.querySelector('.profile_nickname')?.textContent?.trim() || '';
+    }
 
     // 摘要
     const summary =
@@ -1031,10 +1053,10 @@ import {
 
       // 文章类型（原创/转载）
       let articleType = "";
-      if (document.body.innerText.includes("原创")) {
-        articleType = "original";
-      } else if (document.body.innerText.includes("转载")) {
-        articleType = "reprint";
+      if (document.body.innerText.includes('Original') || document.body.innerText.includes('原创')) {
+        articleType = 'original';
+      } else if (document.body.innerText.includes('阅读原文') || document.body.innerText.includes('Read More')) {
+        articleType = 'reprint';
       }
 
       // 发布时间
