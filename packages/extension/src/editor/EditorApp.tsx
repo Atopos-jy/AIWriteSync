@@ -21,6 +21,9 @@ interface Article {
   category?: string;
   articleType?: string;
   publishDate?: string;
+  //文章字段
+  html?: string;
+  markdown?: string;
 }
 
 interface Platform {
@@ -147,18 +150,30 @@ export function EditorApp() {
 
       if (nextIsMDMode) {
         // 富文本 -> Markdown（优先取 contentEditable 的最新 HTML）
-        const html = richContentRef.current?.innerHTML ?? article.content ?? "";
+        const html =
+          richContentRef.current?.innerHTML ??
+          article.html ??
+          article.content ??
+          "";
         const md = htmlToMarkdownNative(html);
-        setArticle((prev) => (prev ? { ...prev, content: md } : prev));
+        setArticle((prev) =>
+          prev ? { ...prev, content: md, markdown: md, html: html } : prev,
+        );
         setIsMDMode(true);
         setEditorMode("edit");
         return;
       }
 
       // Markdown -> 富文本（优先取 textarea 的最新值）
-      const md = mdContentRef.current?.value ?? article.content ?? "";
+      const md =
+        mdContentRef.current?.value ??
+        article.markdown ??
+        article.content ??
+        "";
       const html = marked.parse(md) as string;
-      setArticle((prev) => (prev ? { ...prev, content: html } : prev));
+      setArticle((prev) =>
+        prev ? { ...prev, content: html, markdown: md, html: html } : prev,
+      );
       setIsMDMode(false);
     },
     [article, isMDMode],
@@ -479,6 +494,12 @@ export function EditorApp() {
       ...article,
       title: editedTitle,
       content: editedContent,
+      html:
+        article.html ??
+        (isMDMode ? marked.parse(editedContent) : editedContent),
+      markdown:
+        article.markdown ??
+        (isMDMode ? editedContent : htmlToMarkdownNative(editedContent)),
     };
 
     // 生成 syncId（在发送消息前设置，以便立即过滤消息）
@@ -557,7 +578,7 @@ export function EditorApp() {
         setArticle({ ...article, cover: reader.result as string });
       };
       reader.readAsDataURL(file);
-      // 这里可以添加上传到图床的逻辑
+      // 这里可以添加上传到图片的逻辑
     } catch (error) {
       logger.error("Failed to upload cover:", error);
       setError("封面上传失败");

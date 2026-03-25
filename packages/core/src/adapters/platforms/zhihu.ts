@@ -150,7 +150,23 @@ export class ZhihuAdapter extends CodeAdapter {
       // 4. 知乎特定的内容转换
       content = this.transformContent(content)
 
-      // 5. 更新草稿内容
+      // 5. 处理封面图片
+      let coverUrl: string | undefined
+      if (article.cover) {
+        try {
+          logger.debug(`Uploading cover image: ${article.cover}`)
+          const coverUploadResult = await this.uploadImageByUrl(article.cover)
+          if (coverUploadResult?.url) {
+            coverUrl = coverUploadResult.url
+            logger.debug(`Cover uploaded successfully: ${coverUrl}`)
+          }
+        } catch (error) {
+          logger.error(`Failed to upload cover image:`, error)
+          // 封面上传失败不影响文章发布
+        }
+      }
+
+      // 6. 更新草稿内容
       const updateResponse = await this.runtime.fetch(
         `https://zhuanlan.zhihu.com/api/articles/${draftId}/draft`,
         {
@@ -163,6 +179,7 @@ export class ZhihuAdapter extends CodeAdapter {
           body: JSON.stringify({
             title: article.title,
             content: content,
+            ...(coverUrl && { image_url: coverUrl }),
           }),
         }
       )
