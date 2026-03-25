@@ -518,7 +518,20 @@ export async function processArticleImages(
  */
 export async function publish(
   credentials: MetaWeblogCredentials,
-  article: { title: string; content: string; cover?: string },
+  article: {
+    title: string;
+    content: string;
+    cover?: string;
+    author?: string;
+    summary?: string;
+    tags?: string[];
+    category?: string;
+    articleType?: string;
+    publishDate?: string;
+    url?: string;
+    html?: string;
+    markdown?: string;
+  },
   options?: {
     draftOnly?: boolean;
     processImages?: boolean;
@@ -720,7 +733,20 @@ export async function testTypechoConnection(
  */
 export async function publishToTypecho(
   credentials: MetaWeblogCredentials,
-  article: { title: string; content: string; cover?: string },
+  article: {
+    title: string;
+    content: string;
+    cover?: string;
+    author?: string;
+    summary?: string;
+    tags?: string[];
+    category?: string;
+    articleType?: string;
+    publishDate?: string;
+    url?: string;
+    html?: string;
+    markdown?: string;
+  },
   options?: {
     draftOnly?: boolean;
     processImages?: boolean;

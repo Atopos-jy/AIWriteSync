@@ -460,14 +460,14 @@ export async function publish(
   article: {
     title: string;
     content: string;
-    author: string;
-    summary: string;
-    cover: string;
-    url: string;
-    tags: string[];
-    category: string;
-    articleType: string;
-    publishDate: string;
+    author?: string;
+    summary?: string;
+    cover?: string;
+    url?: string;
+    tags?: string[];
+    category?: string;
+    articleType?: string;
+    publishDate?: string;
     html?: string;
     markdown?: string;
   },
@@ -519,9 +519,13 @@ export async function publish(
       },
       // 自定义字段（存储额外元数据）
       custom_fields: [
-        { key: "article_type", value: article.articleType },
-        { key: "author", value: article.author },
-        { key: "summary", value: article.summary },
+        ...(article.articleType
+          ? [{ key: "article_type", value: article.articleType }]
+          : []),
+        ...(article.author ? [{ key: "author", value: article.author }] : []),
+        ...(article.summary
+          ? [{ key: "summary", value: article.summary }]
+          : []),
       ],
     };
 
