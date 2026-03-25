@@ -1,5 +1,20 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { X, Check, Loader2, ExternalLink, Edit2, Eye } from "lucide-react";
+import {
+  X,
+  Check,
+  Loader2,
+  ExternalLink,
+  Edit2,
+  Eye,
+  Bold,
+  Italic,
+  Underline,
+  List,
+  ListOrdered,
+  Link,
+  Image,
+  Strikethrough,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -73,40 +88,6 @@ function saveSelectedPlatforms(platformIds: string[]) {
     });
 }
 
-// 富文本操作工具函数（核心：处理加粗/斜体/标题等富文本格式）
-const execCommand = (command: string, value?: string) => {
-  document.execCommand(command, false, value);
-};
-
-// 插入图片到富文本
-const insertImageToRichText = (
-  richContentRef: React.RefObject<HTMLDivElement>,
-) => {
-  const url = prompt("输入图片URL:");
-  if (url && richContentRef.current) {
-    const img = document.createElement("img");
-    img.src = url;
-    img.style.maxWidth = "100%";
-    img.style.margin = "10px 0";
-    richContentRef.current.appendChild(img);
-  }
-};
-
-// 插入链接到富文本
-const insertLinkToRichText = (
-  richContentRef: React.RefObject<HTMLDivElement>,
-) => {
-  const url = prompt("输入链接URL:");
-  if (url && richContentRef.current) {
-    const text = prompt("输入链接文字:") || "链接";
-    const a = document.createElement("a");
-    a.href = url;
-    a.target = "_blank";
-    a.textContent = text;
-    a.style.color = "#007fff";
-    richContentRef.current.appendChild(a);
-  }
-};
 export function EditorApp() {
   const [article, setArticle] = useState<Article | null>(null);
   const [editorMode, setEditorMode] = useState<"preview" | "edit">("preview");
@@ -130,6 +111,386 @@ export function EditorApp() {
   const mdContentRef = useRef<HTMLTextAreaElement>(null);
   const richContentRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+
+  // 使用现代的Selection API替代废弃的document.execCommand
+  const execCommand = (command: string, value?: string) => {
+    if (!richContentRef.current) return;
+
+    const selection = window.getSelection();
+    if (!selection) return;
+
+    const range = selection.getRangeAt(0);
+
+    switch (command) {
+      case "bold":
+      case "italic":
+      case "underline":
+      case "strikeThrough":
+        // 使用CSS样式来应用格式
+        const element = document.createElement(
+          command === "bold"
+            ? "strong"
+            : command === "italic"
+              ? "em"
+              : command === "underline"
+                ? "u"
+                : "s",
+        );
+
+        // 提取选中的内容
+        const selectedContent = range.extractContents();
+        element.appendChild(selectedContent);
+        range.insertNode(element);
+
+        // 重新选择插入的内容
+        const newRange = document.createRange();
+        newRange.selectNodeContents(element);
+        selection.removeAllRanges();
+        selection.addRange(newRange);
+        break;
+
+      case "formatBlock":
+        if (value && value.startsWith("<h")) {
+          const level = parseInt(
+            value.replace("<h", "").replace(">", "") || "1",
+          );
+          const heading = document.createElement(`h${level}`);
+          const selectedContent = range.extractContents();
+          heading.appendChild(selectedContent);
+          range.insertNode(heading);
+
+          const newRange = document.createRange();
+          newRange.selectNodeContents(heading);
+          selection.removeAllRanges();
+          selection.addRange(newRange);
+        }
+        break;
+
+      case "insertUnorderedList":
+        const ul = document.createElement("ul");
+        const li = document.createElement("li");
+        const ulContent = range.extractContents();
+        li.appendChild(ulContent);
+        ul.appendChild(li);
+        range.insertNode(ul);
+        break;
+
+      case "insertOrderedList":
+        const ol = document.createElement("ol");
+        const li2 = document.createElement("li");
+        const olContent = range.extractContents();
+        li2.appendChild(olContent);
+        ol.appendChild(li2);
+        range.insertNode(ol);
+        break;
+
+      case "indent":
+        // 增加缩进
+        const currentElement = range.commonAncestorContainer
+          .parentNode as HTMLElement;
+        if (currentElement) {
+          const currentIndent = parseInt(
+            currentElement.style.marginLeft || "0",
+          );
+          currentElement.style.marginLeft = `${currentIndent + 20}px`;
+        }
+        break;
+
+      case "outdent":
+        // 减少缩进
+        const currentElement2 = range.commonAncestorContainer
+          .parentNode as HTMLElement;
+        if (currentElement2) {
+          const currentIndent = parseInt(
+            currentElement2.style.marginLeft || "0",
+          );
+          currentElement2.style.marginLeft = `${Math.max(0, currentIndent - 20)}px`;
+        }
+        break;
+
+      case "insertHorizontalRule":
+        const hr = document.createElement("hr");
+        range.insertNode(hr);
+        // 将光标移动到分隔线之后
+        const hrRange = document.createRange();
+        hrRange.setStartAfter(hr);
+        hrRange.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(hrRange);
+        break;
+    }
+  };
+
+  // Markdown模式下插入格式
+  const insertMarkdownFormat = (prefix: string, suffix: string) => {
+    if (!mdContentRef.current) return;
+    const textarea = mdContentRef.current;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selectedText = textarea.value.substring(start, end);
+    const newValue =
+      textarea.value.substring(0, start) +
+      prefix +
+      selectedText +
+      suffix +
+      textarea.value.substring(end);
+    textarea.value = newValue;
+    updateArticle("content", newValue);
+    textarea.focus();
+    textarea.setSelectionRange(
+      start + prefix.length,
+      end + prefix.length + selectedText.length,
+    );
+  };
+
+  // Markdown模式下插入标题
+  const insertMarkdownHeader = (level: number) => {
+    if (!mdContentRef.current) return;
+    const textarea = mdContentRef.current;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selectedText = textarea.value.substring(start, end);
+
+    // 找到当前行的开始位置
+    let lineStart = start;
+    while (lineStart > 0 && textarea.value[lineStart - 1] !== "\n") {
+      lineStart--;
+    }
+
+    // 找到当前行的结束位置
+    let lineEnd = end;
+    while (
+      lineEnd < textarea.value.length &&
+      textarea.value[lineEnd] !== "\n"
+    ) {
+      lineEnd++;
+    }
+
+    const headerPrefix = "#".repeat(level) + " ";
+    const newValue =
+      textarea.value.substring(0, lineStart) +
+      headerPrefix +
+      selectedText +
+      "\n" +
+      textarea.value.substring(lineEnd);
+    textarea.value = newValue;
+    textarea.focus();
+    textarea.setSelectionRange(
+      lineStart + headerPrefix.length + selectedText.length + 1,
+      lineStart + headerPrefix.length + selectedText.length + 1,
+    );
+  };
+
+  // Markdown模式下插入列表
+  const insertMarkdownList = (prefix: string) => {
+    if (!mdContentRef.current) return;
+    const textarea = mdContentRef.current;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selectedText = textarea.value.substring(start, end);
+
+    // 找到当前行的开始位置
+    let lineStart = start;
+    while (lineStart > 0 && textarea.value[lineStart - 1] !== "\n") {
+      lineStart--;
+    }
+
+    // 找到当前行的结束位置
+    let lineEnd = end;
+    while (
+      lineEnd < textarea.value.length &&
+      textarea.value[lineEnd] !== "\n"
+    ) {
+      lineEnd++;
+    }
+
+    const newValue =
+      textarea.value.substring(0, lineStart) +
+      prefix +
+      selectedText +
+      "\n" +
+      textarea.value.substring(lineEnd);
+    textarea.value = newValue;
+    textarea.focus();
+    textarea.setSelectionRange(
+      lineStart + prefix.length + selectedText.length + 1,
+      lineStart + prefix.length + selectedText.length + 1,
+    );
+  };
+
+  // Markdown模式下插入缩进
+  const insertMarkdownIndent = (increase: boolean) => {
+    if (!mdContentRef.current) return;
+    const textarea = mdContentRef.current;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+
+    // 找到当前行的开始位置
+    let lineStart = start;
+    while (lineStart > 0 && textarea.value[lineStart - 1] !== "\n") {
+      lineStart--;
+    }
+
+    const indent = increase ? "  " : "";
+    let newValue;
+
+    if (increase) {
+      newValue =
+        textarea.value.substring(0, lineStart) +
+        indent +
+        textarea.value.substring(lineStart);
+    } else {
+      // 移除缩进
+      const currentLine = textarea.value.substring(
+        lineStart,
+        textarea.value.indexOf("\n", lineStart) !== -1
+          ? textarea.value.indexOf("\n", lineStart)
+          : textarea.value.length,
+      );
+      const trimmedLine = currentLine.replace(/^\s{2}/, "");
+      newValue =
+        textarea.value.substring(0, lineStart) +
+        trimmedLine +
+        textarea.value.substring(lineStart + currentLine.length);
+    }
+
+    textarea.value = newValue;
+    textarea.focus();
+  };
+
+  // Markdown模式下插入分隔线
+  const insertMarkdownHorizontalRule = () => {
+    if (!mdContentRef.current) return;
+    const textarea = mdContentRef.current;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+
+    const newValue =
+      textarea.value.substring(0, start) +
+      "\n---\n" +
+      textarea.value.substring(end);
+    textarea.value = newValue;
+    textarea.focus();
+    textarea.setSelectionRange(start + 5, start + 5);
+  };
+
+  // 统一插入链接函数
+  const insertLink = () => {
+    // MD 模式且处于编辑模式
+    if (isMDMode && editorMode === "edit") {
+      if (!mdContentRef.current) return;
+      const textarea = mdContentRef.current;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const selectedText = textarea.value.substring(start, end);
+      const url = prompt("输入链接URL:");
+      if (url) {
+        const newValue =
+          textarea.value.substring(0, start) +
+          "[" +
+          (selectedText || "链接") +
+          "](" +
+          url +
+          ")" +
+          textarea.value.substring(end);
+        textarea.value = newValue;
+        textarea.focus();
+        // 光标定位到链接文本之后
+        const newCursorPos =
+          start + (selectedText ? selectedText.length + 3 : 3);
+        textarea.setSelectionRange(newCursorPos, newCursorPos);
+      }
+    } else if (!isMDMode) {
+      // 富文本模式
+      if (!richContentRef.current) return;
+      const url = prompt("输入链接URL:");
+      if (url) {
+        const text = prompt("输入链接文字:", "链接");
+        if (!text) return;
+
+        // 确保富文本区域获得焦点
+        richContentRef.current.focus();
+
+        // 使用Range API插入链接
+        const selection = window.getSelection();
+        let range;
+
+        if (selection && selection.rangeCount > 0) {
+          range = selection.getRangeAt(0);
+        } else {
+          // 如果没有选择范围，创建一个新的范围
+          range = document.createRange();
+          range.selectNodeContents(richContentRef.current);
+          range.collapse(false);
+        }
+
+        // 创建链接元素
+        const a = document.createElement("a");
+        a.href = url;
+        a.target = "_blank";
+        a.textContent = text;
+        a.style.color = "#007fff";
+
+        // 插入链接
+        range.deleteContents();
+        range.insertNode(a);
+
+        // 移动光标到链接后
+        const newRange = document.createRange();
+        newRange.setStartAfter(a);
+        newRange.collapse(true);
+        selection?.removeAllRanges();
+        selection?.addRange(newRange);
+
+        // 更新文章内容
+        updateArticle("content", richContentRef.current.innerHTML);
+      }
+    }
+  };
+  // 插入图片到富文本
+  const insertImage = () => {
+    if (isMDMode && editorMode === "edit") {
+      if (!mdContentRef.current) return;
+      const textarea = mdContentRef.current;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const selectedText = textarea.value.substring(start, end);
+      const url = prompt("输入图片URL:");
+      if (url) {
+        const newValue =
+          textarea.value.substring(0, start) +
+          "![" +
+          (selectedText || "图片") +
+          "](" +
+          url +
+          ")" +
+          textarea.value.substring(end);
+        textarea.value = newValue;
+        updateArticle("content", newValue);
+        textarea.focus();
+        const newCursorPos =
+          start +
+          2 +
+          (selectedText ? selectedText.length + 3 : 3) +
+          url.length +
+          2;
+        textarea.setSelectionRange(newCursorPos, newCursorPos);
+      }
+    } else if (!isMDMode) {
+      if (!richContentRef.current) return;
+      const url = prompt("输入图片URL:");
+      if (url) {
+        richContentRef.current.focus();
+        // 使用 execCommand 在光标位置插入图片
+        document.execCommand("insertImage", false, url);
+        //同步状态
+        const newHtml = richContentRef.current.innerHTML;
+        updateArticle("content", newHtml);
+        updateArticle("html", newHtml);
+        updateArticle("markdown", htmlToMarkdownNative(newHtml));
+      }
+    }
+  };
 
   const updateArticle = useCallback(
     <K extends keyof Article>(key: K, value: Article[K]) => {
@@ -185,6 +546,61 @@ export function EditorApp() {
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw]}
         components={{
+          h1: ({ children, ...props }) => (
+            <h1 {...props} className="text-3xl font-bold mt-8 mb-4">
+              {children}
+            </h1>
+          ),
+          h2: ({ children, ...props }) => (
+            <h2 {...props} className="text-2xl font-bold mt-6 mb-3">
+              {children}
+            </h2>
+          ),
+          h3: ({ children, ...props }) => (
+            <h3 {...props} className="text-xl font-bold mt-5 mb-2">
+              {children}
+            </h3>
+          ),
+          p: ({ children, ...props }) => (
+            <p {...props} className="mb-4">
+              {children}
+            </p>
+          ),
+          ul: ({ children, ...props }) => (
+            <ul {...props} className="list-disc pl-6 mb-4">
+              {children}
+            </ul>
+          ),
+          ol: ({ children, ...props }) => (
+            <ol {...props} className="list-decimal pl-6 mb-4">
+              {children}
+            </ol>
+          ),
+          li: ({ children, ...props }) => (
+            <li {...props} className="mb-2">
+              {children}
+            </li>
+          ),
+          strong: ({ children, ...props }) => (
+            <strong {...props} className="font-bold">
+              {children}
+            </strong>
+          ),
+          em: ({ children, ...props }) => (
+            <em {...props} className="italic">
+              {children}
+            </em>
+          ),
+          u: ({ children, ...props }) => (
+            <u {...props} className="underline">
+              {children}
+            </u>
+          ),
+          s: ({ children, ...props }) => (
+            <s {...props} className="line-through">
+              {children}
+            </s>
+          ),
           img: ({ ...props }) => (
             <img
               {...props}
@@ -429,37 +845,6 @@ export function EditorApp() {
     }
   };
 
-  //加载选中平台
-  const loadSelectedPlatforms = async (platformsList: Platform[]) => {
-    try {
-      const result = await chrome.storage.local.get(SELECTED_PLATFORMS_KEY);
-      const storedPlatforms = result[SELECTED_PLATFORMS_KEY] as
-        | string[]
-        | undefined;
-
-      const authenticated = platformsList.filter((p) => p.isAuthenticated);
-      const authenticatedIds = authenticated.map((p) => p.id);
-      const authenticatedSet = new Set(authenticatedIds);
-
-      let selected: string[];
-      if (storedPlatforms && storedPlatforms.length > 0) {
-        selected = storedPlatforms.filter((id) => authenticatedSet.has(id));
-      } else {
-        selected = authenticatedIds;
-      }
-
-      if (selected.length === 0) {
-        selected = authenticatedIds;
-      }
-
-      setSelectedPlatforms(new Set(selected));
-    } catch (e) {
-      logger.error("Failed to load selected platforms:", e);
-      const authenticated = platformsList.filter((p) => p.isAuthenticated);
-      setSelectedPlatforms(new Set(authenticated.map((p) => p.id)));
-    }
-  };
-
   // 切换平台选中状态
   const togglePlatform = (id: string) => {
     setSelectedPlatforms((prev) => {
@@ -560,11 +945,6 @@ export function EditorApp() {
       }),
       "*",
     );
-  };
-
-  //上传封面
-  const handleRemoveCover = () => {
-    console.log("删除封面");
   };
 
   const handleCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -798,42 +1178,61 @@ export function EditorApp() {
             );
           })}
         </div>
-        {/* 工具栏 */}
+        {/* 工具栏（同时支持富文本和Markdown模式） */}
         <div className="px-6 py-1 bg-gray-50 border-t flex items-center gap-1 overflow-x-auto">
           {/* 基础格式 */}
           <button
-            onClick={() => execCommand("bold")}
-            className="p-1.5 rounded hover:bg-gray-200 text-sm font-bold"
+            onClick={() =>
+              isMDMode ? insertMarkdownFormat("**", "**") : execCommand("bold")
+            }
+            className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="加粗"
           >
-            B
+            <Bold className="w-4 h-4" />
           </button>
           <button
-            onClick={() => execCommand("italic")}
-            className="p-1.5 rounded hover:bg-gray-200 text-sm italic"
+            onClick={() =>
+              isMDMode ? insertMarkdownFormat("*", "*") : execCommand("italic")
+            }
+            className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="斜体"
           >
-            I
+            <Italic className="w-4 h-4" />
           </button>
           <button
-            onClick={() => execCommand("underline")}
+            onClick={() =>
+              isMDMode
+                ? insertMarkdownFormat("<u>", "</u>")
+                : execCommand("underline")
+            }
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="下划线"
           >
-            U
+            <Underline className="w-4 h-4" />
           </button>
           <button
-            onClick={() => execCommand("strikeThrough")}
+            onClick={() =>
+              isMDMode
+                ? insertMarkdownFormat("~~", "~~")
+                : execCommand("strikeThrough")
+            }
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="删除线"
           >
-            S
+            <Strikethrough className="w-4 h-4" />
           </button>
           <div className="w-px h-4 bg-gray-300 mx-1" />
 
           {/* 标题 */}
           <select
-            onChange={(e) => execCommand("formatBlock", e.target.value)}
+            onChange={(e) => {
+              if (isMDMode) {
+                const level = e.target.value.replace("<h", "").replace(">", "");
+                insertMarkdownHeader(parseInt(level));
+              } else {
+                execCommand("formatBlock", e.target.value);
+              }
+            }}
             className="p-1 rounded border border-gray-200 bg-white text-sm focus:outline-none"
             title="标题级别"
           >
@@ -841,33 +1240,48 @@ export function EditorApp() {
             <option value="<h1>">标题1</option>
             <option value="<h2>">标题2</option>
             <option value="<h3>">标题3</option>
+            <option value="<h4>">标题4</option>
+            <option value="<h5>">标题5</option>
+            <option value="<h6>">标题6</option>
           </select>
           <div className="w-px h-4 bg-gray-300 mx-1" />
 
           {/* 列表 */}
           <button
-            onClick={() => execCommand("insertUnorderedList")}
+            onClick={() =>
+              isMDMode
+                ? insertMarkdownList("- ")
+                : execCommand("insertUnorderedList")
+            }
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="无序列表"
           >
-            •
+            <List className="w-4 h-4" />
           </button>
           <button
-            onClick={() => execCommand("insertOrderedList")}
+            onClick={() =>
+              isMDMode
+                ? insertMarkdownList("1. ")
+                : execCommand("insertOrderedList")
+            }
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="有序列表"
           >
-            1.
+            <ListOrdered className="w-4 h-4" />
           </button>
           <button
-            onClick={() => execCommand("indent")}
+            onClick={() =>
+              isMDMode ? insertMarkdownIndent(true) : execCommand("indent")
+            }
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="增加缩进"
           >
             →
           </button>
           <button
-            onClick={() => execCommand("outdent")}
+            onClick={() =>
+              isMDMode ? insertMarkdownIndent(false) : execCommand("outdent")
+            }
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="减少缩进"
           >
@@ -877,21 +1291,25 @@ export function EditorApp() {
 
           {/* 插入内容 */}
           <button
-            onClick={() => insertLinkToRichText(richContentRef)}
+            onClick={() => insertLink()}
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="插入链接"
           >
-            🔗
+            <Link className="w-4 h-4" />
           </button>
           <button
-            onClick={() => insertImageToRichText(richContentRef)}
+            onClick={() => insertImage()}
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="插入图片"
           >
-            🖼️
+            <Image className="w-4 h-4" />
           </button>
           <button
-            onClick={() => execCommand("insertHorizontalRule")}
+            onClick={() =>
+              isMDMode
+                ? insertMarkdownHorizontalRule()
+                : execCommand("insertHorizontalRule")
+            }
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="分隔线"
           >
@@ -988,8 +1406,11 @@ export function EditorApp() {
                 ) : (
                   <div
                     ref={previewRef}
-                    className="prose max-w-none min-h-[800px] bg-white"
-                    style={{ fontSize: "16px", lineHeight: 1.8 }}
+                    className="prose max-w-none min-h-[800px] bg-white prose-headings:font-bold prose-h1:text-4xl prose-h2:text-3xl prose-h3:text-2xl prose-h4:text-1xl prose-h5:text-1 prose-h6:text-1"
+                    style={{
+                      lineHeight: 1.8,
+                      fontSize: "16px",
+                    }}
                   >
                     {renderMarkdown(article.content)}
                   </div>
