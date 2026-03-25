@@ -135,7 +135,7 @@ export function EditorApp() {
     [],
   );
 
-  // B 方案：仅存 article.content，切换模式时做一次 HTML↔Markdown 转换
+  // article.content，切换模式时做一次 HTML↔Markdown 转换
   const switchEditorMode = useCallback(
     (nextIsMDMode: boolean) => {
       if (!article) {
@@ -279,7 +279,8 @@ export function EditorApp() {
             tags: data.article.tags || [],
             category: data.article.category || "",
             articleType: data.article.articleType || "",
-            publishDate: data.article.publishDate || data.article.publishedAt || "",
+            publishDate:
+              data.article.publishDate || data.article.publishedAt || "",
           });
           // 设置初始内容
           // if (contentRef.current && data.article.content) {

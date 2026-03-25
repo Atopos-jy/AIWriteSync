@@ -971,34 +971,37 @@ import {
       document.querySelector(".rich_media_title")?.textContent?.trim();
 
     // 作者
-    let author = '';
-    const authorSpan = document.querySelector('#js_author_name_text');
+    let author = "";
+    const authorSpan = document.querySelector("#js_author_name_text");
     if (authorSpan) {
-      author = authorSpan.textContent?.trim() || '';
+      author = authorSpan.textContent?.trim() || "";
     }
     // 备选：从 .rich_media_meta_text 中提取可见文本
     if (!author) {
-      const authorContainer = document.querySelector('.rich_media_meta_list .rich_media_meta.rich_media_meta_text');
+      const authorContainer = document.querySelector(
+        ".rich_media_meta_list .rich_media_meta.rich_media_meta_text",
+      );
       if (authorContainer) {
         // 获取所有非隐藏的直接子节点文本（包括文本节点）
         const visibleText = Array.from(authorContainer.childNodes)
-          .filter(node => {
+          .filter((node) => {
             if (node.nodeType === Node.ELEMENT_NODE) {
               const el = node as HTMLElement;
               const style = window.getComputedStyle(el);
-              return style.display !== 'none' && style.visibility !== 'hidden';
+              return style.display !== "none" && style.visibility !== "hidden";
             }
             return true;
           })
-          .map(node => node.textContent?.trim() || '')
-          .join('')
+          .map((node) => node.textContent?.trim() || "")
+          .join("")
           .trim();
         author = visibleText;
       }
     }
     // 最终回退：.profile_nickname
     if (!author) {
-      author = document.querySelector('.profile_nickname')?.textContent?.trim() || '';
+      author =
+        document.querySelector(".profile_nickname")?.textContent?.trim() || "";
     }
 
     // 摘要
@@ -1053,10 +1056,27 @@ import {
 
       // 文章类型（原创/转载）
       let articleType = "";
-      if (document.body.innerText.includes('Original') || document.body.innerText.includes('原创')) {
-        articleType = 'original';
-      } else if (document.body.innerText.includes('阅读原文') || document.body.innerText.includes('Read More')) {
-        articleType = 'reprint';
+
+      // 方法1：查找原创标签元素（微信公众号原创标记）
+      const originalTag = Array.from(
+        document.querySelectorAll(".rich_media_meta"),
+      ).find(
+        (el) =>
+          el.textContent?.toLowerCase().includes("original") ||
+          el.textContent?.includes("原创"),
+      );
+
+      // 方法2：查找阅读原文链接
+      const readMoreLink = Array.from(document.querySelectorAll("a")).find(
+        (el) =>
+          el.textContent?.includes("阅读原文") ||
+          el.textContent?.toLowerCase().includes("read more"),
+      );
+
+      if (originalTag) {
+        articleType = "original";
+      } else if (readMoreLink) {
+        articleType = "reprint";
       }
 
       // 发布时间
