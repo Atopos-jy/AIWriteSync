@@ -26,6 +26,7 @@ import {
   restoreCodeBlocks,
   type PreprocessResult,
 } from "../lib/content-processor";
+import { url } from "inspector";
 
 const logger = createLogger("Extractor");
 
@@ -37,6 +38,11 @@ interface ExtractedArticle {
   html?: string; // 原始 HTML（可选，用于某些平台）
   summary?: string;
   cover?: string;
+  tags?: string[];
+  category?: string;
+  content?: string;
+  url?: string;
+  publishedDate?: string;
   source: {
     url: string;
     platform: string;
@@ -129,6 +135,9 @@ function extractWeixinArticle(): ExtractedArticle | null {
       author: author || undefined,
       articleType: articleType || undefined,
       markdown,
+      tags: [],
+      category: undefined,
+      publishedDate: undefined,
       html, // 保留原始 HTML，微信平台需要
       summary: summary || undefined,
       cover: cover || undefined,
@@ -177,6 +186,9 @@ function readerResultToArticle(result: ReaderResult): ExtractedArticle {
     markdown,
     html: processedHtml, // 预处理后的 HTML
     summary: result.excerpt,
+    tags: [],
+    category: undefined,
+    publishedDate: undefined,
     cover: result.leadingImage || result.mainImage,
     source: {
       url: window.location.href,
@@ -269,6 +281,9 @@ function extractWithSelectors(): ExtractedArticle | null {
     html, // 保留原始 HTML
     summary: summary || undefined,
     cover: cover || undefined,
+    tags: [],
+    category: undefined,
+    publishedDate: undefined,
     source: {
       url: window.location.href,
       platform: "selector",
@@ -436,6 +451,7 @@ function sendDataToEditor(
 ) {
   if (!editorIframe?.contentWindow) return;
 
+  console.log("[Extractor] Extracted article:", article);
   // 发送文章数据
   editorIframe.contentWindow.postMessage(
     JSON.stringify({
@@ -444,9 +460,14 @@ function sendDataToEditor(
         title: article.title,
         author: article.author,
         summary: article.summary,
+        url: article.source.url,
+        tags: article.tags,
+        html: article.html,
+        markdown: article.markdown,
+        category: article.category,
+        publishedDate: article.publishedDate,
         content: article.html || article.markdown,
         cover: article.cover,
-        url: article.source.url,
         articleType: article.articleType,
       },
     }),

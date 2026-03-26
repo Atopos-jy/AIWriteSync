@@ -80,6 +80,34 @@ type SyncStatus = "idle" | "syncing" | "completed";
 // Storage key for selected platforms (same as popup)
 const SELECTED_PLATFORMS_KEY = "selectedPlatforms";
 
+/**
+ * 从平台列表中过滤出已登录的平台
+ */
+function getAuthenticatedPlatforms(platforms: Platform[]) {
+  return platforms.filter((p: Platform) => p.isAuthenticated);
+}
+
+/**
+ * 将平台数据与登录状态结合
+ */
+function mergePlatformsWithAuth(platforms: Platform[], authCache: Record<string, any> = {}) {
+  const now = Date.now();
+  
+  return platforms.map(platform => {
+    const authItem = authCache[platform.id];
+    // 检查缓存是否有效（已登录5分钟，未登录30秒）
+    const cacheTTL = authItem?.isAuthenticated ? 5 * 60 * 1000 : 30 * 1000;
+    const cacheValid = authItem && now - authItem.timestamp < cacheTTL;
+    
+    return {
+      ...platform,
+      isAuthenticated: cacheValid ? authItem.isAuthenticated : false,
+      username: cacheValid ? authItem.username : undefined,
+      error: cacheValid ? authItem.error : undefined,
+    };
+  });
+}
+
 // 保存选中的平台到 storage
 function saveSelectedPlatforms(platformIds: string[]) {
   chrome.storage.local
@@ -113,163 +141,6 @@ export function EditorApp() {
   const mdContentRef = useRef<HTMLTextAreaElement>(null);
   const richContentRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
-
-  // 使用现代的Selection API替代废弃的document.execCommand
-  const execCommand = (command: string, value?: string) => {
-    if (!richContentRef.current) return;
-
-    const selection = window.getSelection();
-    if (!selection) return;
-    if (selection.rangeCount === 0) return;
-
-    const range = selection.getRangeAt(0);
-    let contentChanged = false;
-
-    switch (command) {
-      case "bold":
-      case "italic":
-      case "underline":
-      case "strikeThrough":
-        const element = document.createElement(
-          command === "bold"
-            ? "strong"
-            : command === "italic"
-              ? "em"
-              : command === "underline"
-                ? "u"
-                : "s",
-        );
-
-        const selectedContent = range.extractContents();
-        element.appendChild(selectedContent);
-        range.insertNode(element);
-        contentChanged = true;
-
-        const newRange = document.createRange();
-        newRange.selectNodeContents(element);
-        selection.removeAllRanges();
-        selection.addRange(newRange);
-        break;
-
-      // ======================
-      // 👇 修复：标题 1-6 完美生效
-      // ======================
-      case "formatBlock":
-        if (value && value.startsWith("<h")) {
-          const level = parseInt(
-            value.replace("<h", "").replace(">", "") || "1",
-          );
-          const heading = document.createElement(`h${level}`);
-
-          // 检查是否有选中内容
-          const selectedText = range.toString();
-
-          if (selectedText) {
-            // 有选中内容：用标题包裹选中内容
-            const content = range.extractContents();
-            heading.appendChild(content);
-            range.insertNode(heading);
-            contentChanged = true;
-
-            // 恢复选中
-            const r = document.createRange();
-            r.selectNodeContents(heading);
-            selection.removeAllRanges();
-            selection.addRange(r);
-          } else {
-            // 光标折叠（无选中）：找到光标所在的块级祖先元素，替换为标题
-            let currentNode = range.commonAncestorContainer;
-
-            // 找到块级祖先元素（p, div, h1-h6等）
-            while (currentNode && currentNode.nodeType === Node.ELEMENT_NODE) {
-              const element = currentNode as HTMLElement;
-              if (element.tagName.match(/^(P|DIV|H[1-6])$/)) {
-                // 将现有内容移动到新标题元素
-                const content = document.createDocumentFragment();
-                while (element.firstChild) {
-                  content.appendChild(element.firstChild);
-                }
-                heading.appendChild(content);
-
-                // 替换元素
-                element.parentNode?.replaceChild(heading, element);
-                contentChanged = true;
-
-                // 恢复光标位置
-                const r = document.createRange();
-                r.setStart(heading, heading.childNodes.length);
-                r.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(r);
-                break;
-              }
-              if (currentNode.parentNode) {
-                currentNode = currentNode.parentNode;
-              }
-            }
-          }
-        }
-        break;
-
-      case "insertUnorderedList":
-        const ul = document.createElement("ul");
-        const li = document.createElement("li");
-        li.appendChild(range.extractContents());
-        ul.appendChild(li);
-        range.insertNode(ul);
-        contentChanged = true;
-        break;
-
-      case "insertOrderedList":
-        const ol = document.createElement("ol");
-        const li2 = document.createElement("li");
-        li2.appendChild(range.extractContents());
-        ol.appendChild(li2);
-        range.insertNode(ol);
-        contentChanged = true;
-        break;
-
-      case "indent":
-        const currentElement = range.commonAncestorContainer
-          .parentElement as HTMLElement;
-        if (currentElement) {
-          const currentIndent = parseInt(
-            currentElement.style.marginLeft || "0",
-          );
-          currentElement.style.marginLeft = `${currentIndent + 20}px`;
-          contentChanged = true;
-        }
-        break;
-
-      case "outdent":
-        const currentElement2 = range.commonAncestorContainer
-          .parentElement as HTMLElement;
-        if (currentElement2) {
-          const currentIndent = parseInt(
-            currentElement2.style.marginLeft || "0",
-          );
-          currentElement2.style.marginLeft = `${Math.max(0, currentIndent - 20)}px`;
-          contentChanged = true;
-        }
-        break;
-
-      case "insertHorizontalRule":
-        const hr = document.createElement("hr");
-        range.insertNode(hr);
-        contentChanged = true;
-
-        const hrRange = document.createRange();
-        hrRange.setStartAfter(hr);
-        hrRange.collapse(true);
-        selection.removeAllRanges();
-        selection.addRange(hrRange);
-        break;
-    }
-
-    if (contentChanged && richContentRef.current) {
-      updateArticle("content", richContentRef.current.innerHTML);
-    }
-  };
 
   // Markdown模式下插入格式
   const insertMarkdownFormat = (prefix: string, suffix: string) => {
@@ -452,49 +323,15 @@ export function EditorApp() {
         textarea.setSelectionRange(newCursorPos, newCursorPos);
       }
     } else if (!isMDMode) {
-      // 富文本模式
-      if (!richContentRef.current) return;
+      // 富文本模式 - 使用 TipTap API
+      if (!tiptapEditor) return;
       const url = prompt("输入链接URL:");
       if (url) {
         const text = prompt("输入链接文字:", "链接");
         if (!text) return;
 
-        // 确保富文本区域获得焦点
-        richContentRef.current.focus();
-
-        // 使用Range API插入链接
-        const selection = window.getSelection();
-        let range;
-
-        if (selection && selection.rangeCount > 0) {
-          range = selection.getRangeAt(0);
-        } else {
-          // 如果没有选择范围，创建一个新的范围
-          range = document.createRange();
-          range.selectNodeContents(richContentRef.current);
-          range.collapse(false);
-        }
-
-        // 创建链接元素
-        const a = document.createElement("a");
-        a.href = url;
-        a.target = "_blank";
-        a.textContent = text;
-        a.style.color = "#007fff";
-
-        // 插入链接
-        range.deleteContents();
-        range.insertNode(a);
-
-        // 移动光标到链接后
-        const newRange = document.createRange();
-        newRange.setStartAfter(a);
-        newRange.collapse(true);
-        selection?.removeAllRanges();
-        selection?.addRange(newRange);
-
-        // 更新文章内容
-        updateArticle("content", richContentRef.current.innerHTML);
+        // 使用 TipTap 命令插入链接
+        tiptapEditor.commands.insertContent(`<a href="${url}">${text}</a>`);
       }
     }
   };
@@ -528,17 +365,12 @@ export function EditorApp() {
         textarea.setSelectionRange(newCursorPos, newCursorPos);
       }
     } else if (!isMDMode) {
-      if (!richContentRef.current) return;
+      // 富文本模式 - 使用 TipTap API
+      if (!tiptapEditor) return;
       const url = prompt("输入图片URL:");
       if (url) {
-        richContentRef.current.focus();
-        // 使用 execCommand 在光标位置插入图片
-        document.execCommand("insertImage", false, url);
-        //同步状态
-        const newHtml = richContentRef.current.innerHTML;
-        updateArticle("content", newHtml);
-        updateArticle("html", newHtml);
-        updateArticle("markdown", htmlToMarkdownNative(newHtml));
+        // 使用 TipTap 命令插入图片
+        tiptapEditor.commands.insertContent(`<img src="${url}" alt="图片" />`);
       }
     }
   };
@@ -561,8 +393,9 @@ export function EditorApp() {
       if (nextIsMDMode === isMDMode) return;
 
       if (nextIsMDMode) {
-        // 富文本 -> Markdown（优先取 contentEditable 的最新 HTML）
+        // 富文本 -> Markdown
         const html =
+          tiptapEditor?.getHTML() ??
           richContentRef.current?.innerHTML ??
           article.html ??
           article.content ??
@@ -588,7 +421,7 @@ export function EditorApp() {
       );
       setIsMDMode(false);
     },
-    [article, isMDMode],
+    [article, isMDMode, tiptapEditor],
   );
 
   const renderMarkdown = useCallback((content: string) => {
@@ -799,9 +632,7 @@ export function EditorApp() {
                 const storedPlatforms = result[SELECTED_PLATFORMS_KEY] as
                   | string[]
                   | undefined;
-                const authenticated = data.platforms.filter(
-                  (p: Platform) => p.isAuthenticated,
-                );
+                const authenticated = getAuthenticatedPlatforms(data.platforms);
                 const authenticatedIds = authenticated.map(
                   (p: Platform) => p.id,
                 );
@@ -828,9 +659,7 @@ export function EditorApp() {
               .catch((e) => {
                 logger.error("Failed to load selected platforms:", e);
                 // 失败时默认选中所有已登录平台
-                const authenticated = data.platforms.filter(
-                  (p: Platform) => p.isAuthenticated,
-                );
+                const authenticated = getAuthenticatedPlatforms(data.platforms);
                 setSelectedPlatforms(
                   new Set(authenticated.map((p: Platform) => p.id)),
                 );
@@ -871,6 +700,69 @@ export function EditorApp() {
 
     // 通知父窗口已准备好
     window.parent.postMessage(JSON.stringify({ type: "EDITOR_READY" }), "*");
+
+    // 独立模式：获取平台数据
+    const fetchPlatforms = async () => {
+      try {
+        // 首先尝试从 local storage 读取登录缓存和平台数据
+        console.log("fetchPlatforms: 开始获取平台数据");
+        const storageResult = await chrome.storage.local.get([
+          "authCache",
+          "platforms",
+        ]);
+
+        // 如果有缓存的平台数据，结合登录状态使用
+        if (storageResult.platforms && Array.isArray(storageResult.platforms)) {
+          const platforms = storageResult.platforms;
+          const authCache = storageResult.authCache || {};
+          
+          // 将平台数据与登录状态结合
+          const platformsWithAuth = mergePlatformsWithAuth(platforms, authCache);
+
+          setPlatforms(platformsWithAuth);
+          
+          // 自动勾选已登录平台
+          console.log(
+            "fetchPlatforms: 使用缓存 platforms",
+            platformsWithAuth,
+          );
+          const authenticated = getAuthenticatedPlatforms(platformsWithAuth);
+          const authenticatedIds = authenticated.map((p: Platform) => p.id);
+          setSelectedPlatforms(new Set(authenticatedIds));
+          saveSelectedPlatforms(authenticatedIds);
+          logger.info("Loaded platforms from local storage with auth status");
+          return;
+        }
+
+        // 如果只有登录缓存，没有平台数据，构建平台数据
+        if (storageResult.authCache) {
+          const authCache = storageResult.authCache;
+          // 这里需要知道所有支持的平台列表
+          // 由于没有完整的平台元数据，我们只能基于登录状态构建
+          logger.info("Found authCache but no platforms data");
+        }
+
+        // 如果没有缓存数据，保持初始状态
+        // 不调用后台API，避免独立页面无法正常通信的问题
+        logger.info("No platforms data in storage, keeping initial state");
+      } catch (error) {
+        logger.error("Failed to fetch platforms:", error);
+      }
+    };
+
+    // 尝试加载草稿
+    loadDraft();
+
+    // 检测是否有父页面
+    const hasParentPage = window.parent !== window;
+
+    // 只有在没有父页面时才获取平台数据
+    if (!hasParentPage) {
+      logger.info("独立模式：直接获取平台数据");
+      fetchPlatforms();
+    } else {
+      logger.info("有父页面模式：等待父页面发送数据");
+    }
 
     return () => window.removeEventListener("message", handleMessage);
   }, []);
@@ -1253,8 +1145,6 @@ export function EditorApp() {
                 insertMarkdownFormat("**", "**");
               } else if (tiptapEditor) {
                 tiptapEditor.commands.toggleBold();
-              } else {
-                execCommand("bold");
               }
             }}
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
@@ -1268,8 +1158,6 @@ export function EditorApp() {
                 insertMarkdownFormat("*", "*");
               } else if (tiptapEditor) {
                 tiptapEditor.commands.toggleItalic();
-              } else {
-                execCommand("italic");
               }
             }}
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
@@ -1283,8 +1171,6 @@ export function EditorApp() {
                 insertMarkdownFormat("<u>", "</u>");
               } else if (tiptapEditor) {
                 tiptapEditor.commands.toggleUnderline();
-              } else {
-                execCommand("underline");
               }
             }}
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
@@ -1298,8 +1184,6 @@ export function EditorApp() {
                 insertMarkdownFormat("~~", "~~");
               } else if (tiptapEditor) {
                 tiptapEditor.commands.toggleStrike();
-              } else {
-                execCommand("strikeThrough");
               }
             }}
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
@@ -1331,8 +1215,6 @@ export function EditorApp() {
                   );
                   tiptapEditor.commands.setHeading({ level });
                 }
-              } else {
-                execCommand("formatBlock", value);
               }
             }}
             className="p-1 rounded border border-gray-200 bg-white text-sm focus:outline-none"
@@ -1355,8 +1237,6 @@ export function EditorApp() {
                 insertMarkdownList("- ");
               } else if (tiptapEditor) {
                 tiptapEditor.commands.toggleBulletList();
-              } else {
-                execCommand("insertUnorderedList");
               }
             }}
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
@@ -1370,8 +1250,6 @@ export function EditorApp() {
                 insertMarkdownList("1. ");
               } else if (tiptapEditor) {
                 tiptapEditor.commands.toggleOrderedList();
-              } else {
-                execCommand("insertOrderedList");
               }
             }}
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
@@ -1381,7 +1259,9 @@ export function EditorApp() {
           </button>
           <button
             onClick={() =>
-              isMDMode ? insertMarkdownIndent(true) : execCommand("indent")
+              isMDMode
+                ? insertMarkdownIndent(true)
+                : tiptapEditor?.commands.indent()
             }
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="增加缩进"
@@ -1390,7 +1270,9 @@ export function EditorApp() {
           </button>
           <button
             onClick={() =>
-              isMDMode ? insertMarkdownIndent(false) : execCommand("outdent")
+              isMDMode
+                ? insertMarkdownIndent(false)
+                : tiptapEditor?.commands.outdent()
             }
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="减少缩进"
@@ -1418,7 +1300,7 @@ export function EditorApp() {
             onClick={() =>
               isMDMode
                 ? insertMarkdownHorizontalRule()
-                : execCommand("insertHorizontalRule")
+                : tiptapEditor?.commands.insertHorizontalRule()
             }
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="分隔线"
