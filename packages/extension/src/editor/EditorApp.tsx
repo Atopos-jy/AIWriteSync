@@ -23,9 +23,10 @@ import { createLogger } from "../lib/logger";
 import { useDebounce } from "use-debounce";
 import { htmlToMarkdownNative } from "@wechatsync/core";
 import { marked } from "marked";
+import { TipTapEditor } from "./TipTapEditor";
 const logger = createLogger("Editor");
 
-interface Article {
+export interface Article {
   title: string;
   author?: string;
   summary?: string;
@@ -92,6 +93,7 @@ export function EditorApp() {
   const [article, setArticle] = useState<Article | null>(null);
   const [editorMode, setEditorMode] = useState<"preview" | "edit">("preview");
   const [isMDMode, setIsMDMode] = useState<boolean>(false);
+  const [tiptapEditor, setTiptapEditor] = useState<any>(null);
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [selectedPlatforms, setSelectedPlatforms] = useState<Set<string>>(
     new Set(),
@@ -118,15 +120,16 @@ export function EditorApp() {
 
     const selection = window.getSelection();
     if (!selection) return;
+    if (selection.rangeCount === 0) return;
 
     const range = selection.getRangeAt(0);
+    let contentChanged = false;
 
     switch (command) {
       case "bold":
       case "italic":
       case "underline":
       case "strikeThrough":
-        // 使用CSS样式来应用格式
         const element = document.createElement(
           command === "bold"
             ? "strong"
@@ -137,87 +140,134 @@ export function EditorApp() {
                 : "s",
         );
 
-        // 提取选中的内容
         const selectedContent = range.extractContents();
         element.appendChild(selectedContent);
         range.insertNode(element);
+        contentChanged = true;
 
-        // 重新选择插入的内容
         const newRange = document.createRange();
         newRange.selectNodeContents(element);
         selection.removeAllRanges();
         selection.addRange(newRange);
         break;
 
+      // ======================
+      // 👇 修复：标题 1-6 完美生效
+      // ======================
       case "formatBlock":
         if (value && value.startsWith("<h")) {
           const level = parseInt(
             value.replace("<h", "").replace(">", "") || "1",
           );
           const heading = document.createElement(`h${level}`);
-          const selectedContent = range.extractContents();
-          heading.appendChild(selectedContent);
-          range.insertNode(heading);
 
-          const newRange = document.createRange();
-          newRange.selectNodeContents(heading);
-          selection.removeAllRanges();
-          selection.addRange(newRange);
+          // 检查是否有选中内容
+          const selectedText = range.toString();
+
+          if (selectedText) {
+            // 有选中内容：用标题包裹选中内容
+            const content = range.extractContents();
+            heading.appendChild(content);
+            range.insertNode(heading);
+            contentChanged = true;
+
+            // 恢复选中
+            const r = document.createRange();
+            r.selectNodeContents(heading);
+            selection.removeAllRanges();
+            selection.addRange(r);
+          } else {
+            // 光标折叠（无选中）：找到光标所在的块级祖先元素，替换为标题
+            let currentNode = range.commonAncestorContainer;
+
+            // 找到块级祖先元素（p, div, h1-h6等）
+            while (currentNode && currentNode.nodeType === Node.ELEMENT_NODE) {
+              const element = currentNode as HTMLElement;
+              if (element.tagName.match(/^(P|DIV|H[1-6])$/)) {
+                // 将现有内容移动到新标题元素
+                const content = document.createDocumentFragment();
+                while (element.firstChild) {
+                  content.appendChild(element.firstChild);
+                }
+                heading.appendChild(content);
+
+                // 替换元素
+                element.parentNode?.replaceChild(heading, element);
+                contentChanged = true;
+
+                // 恢复光标位置
+                const r = document.createRange();
+                r.setStart(heading, heading.childNodes.length);
+                r.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(r);
+                break;
+              }
+              if (currentNode.parentNode) {
+                currentNode = currentNode.parentNode;
+              }
+            }
+          }
         }
         break;
 
       case "insertUnorderedList":
         const ul = document.createElement("ul");
         const li = document.createElement("li");
-        const ulContent = range.extractContents();
-        li.appendChild(ulContent);
+        li.appendChild(range.extractContents());
         ul.appendChild(li);
         range.insertNode(ul);
+        contentChanged = true;
         break;
 
       case "insertOrderedList":
         const ol = document.createElement("ol");
         const li2 = document.createElement("li");
-        const olContent = range.extractContents();
-        li2.appendChild(olContent);
+        li2.appendChild(range.extractContents());
         ol.appendChild(li2);
         range.insertNode(ol);
+        contentChanged = true;
         break;
 
       case "indent":
-        // 增加缩进
         const currentElement = range.commonAncestorContainer
-          .parentNode as HTMLElement;
+          .parentElement as HTMLElement;
         if (currentElement) {
           const currentIndent = parseInt(
             currentElement.style.marginLeft || "0",
           );
           currentElement.style.marginLeft = `${currentIndent + 20}px`;
+          contentChanged = true;
         }
         break;
 
       case "outdent":
-        // 减少缩进
         const currentElement2 = range.commonAncestorContainer
-          .parentNode as HTMLElement;
+          .parentElement as HTMLElement;
         if (currentElement2) {
           const currentIndent = parseInt(
             currentElement2.style.marginLeft || "0",
           );
           currentElement2.style.marginLeft = `${Math.max(0, currentIndent - 20)}px`;
+          contentChanged = true;
         }
         break;
 
       case "insertHorizontalRule":
         const hr = document.createElement("hr");
         range.insertNode(hr);
-        // 将光标移动到分隔线之后
+        contentChanged = true;
+
         const hrRange = document.createRange();
         hrRange.setStartAfter(hr);
         hrRange.collapse(true);
         selection.removeAllRanges();
         selection.addRange(hrRange);
         break;
+    }
+
+    if (contentChanged && richContentRef.current) {
+      updateArticle("content", richContentRef.current.innerHTML);
     }
   };
 
@@ -274,6 +324,7 @@ export function EditorApp() {
       "\n" +
       textarea.value.substring(lineEnd);
     textarea.value = newValue;
+    updateArticle("content", newValue);
     textarea.focus();
     textarea.setSelectionRange(
       lineStart + headerPrefix.length + selectedText.length + 1,
@@ -560,6 +611,21 @@ export function EditorApp() {
             <h3 {...props} className="text-xl font-bold mt-5 mb-2">
               {children}
             </h3>
+          ),
+          h4: ({ children, ...props }) => (
+            <h4 {...props} className="text-lg font-bold mt-4 mb-2">
+              {children}
+            </h4>
+          ),
+          h5: ({ children, ...props }) => (
+            <h5 {...props} className="text-md font-bold mt-3 mb-2">
+              {children}
+            </h5>
+          ),
+          h6: ({ children, ...props }) => (
+            <h6 {...props} className="text-sm font-bold mt-2 mb-2">
+              {children}
+            </h6>
           ),
           p: ({ children, ...props }) => (
             <p {...props} className="mb-4">
@@ -1182,40 +1248,60 @@ export function EditorApp() {
         <div className="px-6 py-1 bg-gray-50 border-t flex items-center gap-1 overflow-x-auto">
           {/* 基础格式 */}
           <button
-            onClick={() =>
-              isMDMode ? insertMarkdownFormat("**", "**") : execCommand("bold")
-            }
+            onClick={() => {
+              if (isMDMode) {
+                insertMarkdownFormat("**", "**");
+              } else if (tiptapEditor) {
+                tiptapEditor.commands.toggleBold();
+              } else {
+                execCommand("bold");
+              }
+            }}
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="加粗"
           >
             <Bold className="w-4 h-4" />
           </button>
           <button
-            onClick={() =>
-              isMDMode ? insertMarkdownFormat("*", "*") : execCommand("italic")
-            }
+            onClick={() => {
+              if (isMDMode) {
+                insertMarkdownFormat("*", "*");
+              } else if (tiptapEditor) {
+                tiptapEditor.commands.toggleItalic();
+              } else {
+                execCommand("italic");
+              }
+            }}
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="斜体"
           >
             <Italic className="w-4 h-4" />
           </button>
           <button
-            onClick={() =>
-              isMDMode
-                ? insertMarkdownFormat("<u>", "</u>")
-                : execCommand("underline")
-            }
+            onClick={() => {
+              if (isMDMode) {
+                insertMarkdownFormat("<u>", "</u>");
+              } else if (tiptapEditor) {
+                tiptapEditor.commands.toggleUnderline();
+              } else {
+                execCommand("underline");
+              }
+            }}
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="下划线"
           >
             <Underline className="w-4 h-4" />
           </button>
           <button
-            onClick={() =>
-              isMDMode
-                ? insertMarkdownFormat("~~", "~~")
-                : execCommand("strikeThrough")
-            }
+            onClick={() => {
+              if (isMDMode) {
+                insertMarkdownFormat("~~", "~~");
+              } else if (tiptapEditor) {
+                tiptapEditor.commands.toggleStrike();
+              } else {
+                execCommand("strikeThrough");
+              }
+            }}
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="删除线"
           >
@@ -1226,11 +1312,27 @@ export function EditorApp() {
           {/* 标题 */}
           <select
             onChange={(e) => {
+              const value = e.target.value;
               if (isMDMode) {
-                const level = e.target.value.replace("<h", "").replace(">", "");
-                insertMarkdownHeader(parseInt(level));
+                if (value === "<p>") {
+                  // 正文
+                } else {
+                  const level = parseInt(
+                    value.replace("<h", "").replace(">", "") || "1",
+                  );
+                  insertMarkdownHeader(level);
+                }
+              } else if (tiptapEditor) {
+                if (value === "<p>") {
+                  tiptapEditor.commands.clearInclusiveMarks();
+                } else {
+                  const level = parseInt(
+                    value.replace("<h", "").replace(">", "") || "1",
+                  );
+                  tiptapEditor.commands.setHeading({ level });
+                }
               } else {
-                execCommand("formatBlock", e.target.value);
+                execCommand("formatBlock", value);
               }
             }}
             className="p-1 rounded border border-gray-200 bg-white text-sm focus:outline-none"
@@ -1248,22 +1350,30 @@ export function EditorApp() {
 
           {/* 列表 */}
           <button
-            onClick={() =>
-              isMDMode
-                ? insertMarkdownList("- ")
-                : execCommand("insertUnorderedList")
-            }
+            onClick={() => {
+              if (isMDMode) {
+                insertMarkdownList("- ");
+              } else if (tiptapEditor) {
+                tiptapEditor.commands.toggleBulletList();
+              } else {
+                execCommand("insertUnorderedList");
+              }
+            }}
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="无序列表"
           >
             <List className="w-4 h-4" />
           </button>
           <button
-            onClick={() =>
-              isMDMode
-                ? insertMarkdownList("1. ")
-                : execCommand("insertOrderedList")
-            }
+            onClick={() => {
+              if (isMDMode) {
+                insertMarkdownList("1. ");
+              } else if (tiptapEditor) {
+                tiptapEditor.commands.toggleOrderedList();
+              } else {
+                execCommand("insertOrderedList");
+              }
+            }}
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="有序列表"
           >
@@ -1417,26 +1527,11 @@ export function EditorApp() {
                 )}
               </div>
             ) : (
-              // 富文本模式（完全对标公众号：无框、大块、沉浸式）
-              <div
-                ref={richContentRef}
-                contentEditable
-                suppressContentEditableWarning
-                onBlur={(e) =>
-                  updateArticle("content", e.currentTarget.innerHTML)
-                }
-                className="outline-none rounded-lg min-h-[800px] bg-white"
-                style={{
-                  fontSize: "16px",
-                  lineHeight: 1.8,
-                  color: "#333",
-                  letterSpacing: "0.5px", // 公众号文字间距
-                }}
-                dangerouslySetInnerHTML={{
-                  __html:
-                    article.content ||
-                    '<div class="text-gray-300">请在这里编写文章内容...</div>',
-                }}
+              // 富文本模式 - 使用 TipTap 编辑器
+              <TipTapEditor
+                article={article}
+                onChange={(content) => updateArticle("content", content)}
+                onEditorReady={setTiptapEditor}
               />
             )}
           </div>

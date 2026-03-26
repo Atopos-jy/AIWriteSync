@@ -19,6 +19,7 @@
     "clean": "pnpm -r run clean && rm -rf node_modules"
   },
   "devDependencies": {
+    "@tailwindcss/typography": "^0.5.19",
     "@types/node": "^20.10.0",
     "@typescript-eslint/eslint-plugin": "^6.13.0",
     "@typescript-eslint/parser": "^6.13.0",
@@ -37,7 +38,12 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@modyfi/vite-plugin-yaml": "^1.1.1"
+    "@modyfi/vite-plugin-yaml": "^1.1.1",
+    "@tiptap/extension-image": "^3.20.5",
+    "@tiptap/extension-link": "^3.20.5",
+    "@tiptap/extension-underline": "^3.20.5",
+    "@tiptap/react": "^3.20.5",
+    "@tiptap/starter-kit": "^3.20.5"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
