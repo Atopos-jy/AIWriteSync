@@ -17,23 +17,6 @@
   </head>
   <body style="height: 100%; width: 100%; margin: 0">
     <div id="root"></div>
-    <script>
-      // 编辑器初始化时执行
-      document.addEventListener("DOMContentLoaded", async () => {
-        const authCache = await getAuthCache();
-        console.log("编辑器已获取登录缓存：", authCache);
-
-        // 你可以在这里：
-        // 1. 渲染登录状态
-        // 2. 自动选择已登录的平台
-        // 3. 禁用未登录平台
-      });
-
-      async function getAuthCache() {
-        const res = await chrome.storage.local.get("authCache");
-        return res.authCache || {};
-      }
-    </script>
     <script type="module" src="./main.tsx"></script>
   </body>
 </html>

@@ -204,8 +204,13 @@ export class CSDNAdapter extends CodeAdapter {
         }
       }
 
-      // Use pre-processed markdown content directly
-      let markdown = article.markdown || "";
+      // 选择内容格式：优先使用markdown，其次是content，最后是html
+      let markdown = article.markdown || article.content || article.html || "";
+
+      // 如果有作者信息，添加到正文开头
+      if (article.author) {
+        markdown = `**作者：${article.author}**\n\n${markdown}`;
+      }
 
       // Process images in markdown
       markdown = await this.processImages(
@@ -254,7 +259,8 @@ export class CSDNAdapter extends CodeAdapter {
             content: htmlContent,
             readType: "public",
             level: 0,
-            tags: "",
+            tags: article.tags?.join(",") || "",
+            brief_content: article.summary || "",
             status: 2, // 草稿
             categories: "",
             type: "original",

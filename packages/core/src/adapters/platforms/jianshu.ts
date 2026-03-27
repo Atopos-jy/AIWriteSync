@@ -140,8 +140,18 @@ export class JianshuAdapter extends CodeAdapter {
       const draftId = createData.id;
       logger.debug("Draft created:", draftId);
 
-      // Use pre-processed HTML content directly
-      let content = article.html || "";
+      // 选择内容格式：优先使用html，其次是content，最后是markdown
+      let content = article.html || article.content || article.markdown || "";
+
+      // 如果有摘要，添加到正文开头
+      if (article.summary) {
+        content = `<blockquote>${article.summary}</blockquote>\n${content}`;
+      }
+
+      // 如果有作者信息，添加到正文开头
+      if (article.author) {
+        content = `<p><strong>作者：${article.author}</strong></p>\n${content}`;
+      }
 
       // Jianshu-specific: remove empty paragraphs, remove trailing br
       content = content.replace(/<p>\s*<\/p>/gi, "");
