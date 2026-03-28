@@ -1,5 +1,5 @@
 /**
- * B站适配器 - 适配新版编辑器 (new-edit) 与封面功能
+ * B站适配器 - 兼容新版编辑器的稳定版
  */
 import { CodeAdapter, type ImageUploadResult } from "../code-adapter";
 import type {
@@ -9,16 +9,6 @@ import type {
   PlatformMeta,
 } from "../../types";
 import type { PublishOptions } from "../types";
-import { createLogger } from "../../lib/logger";
-
-const logger = createLogger("Bilibili");
-
-interface BilibiliUserInfo {
-  mid: number;
-  uname: string;
-  face: string;
-  isLogin: boolean;
-}
 
 export class BilibiliAdapter extends CodeAdapter {
   readonly meta: PlatformMeta = {
@@ -34,7 +24,7 @@ export class BilibiliAdapter extends CodeAdapter {
     removeLinks: true,
   };
 
-  private userInfo: BilibiliUserInfo | null = null;
+  private userInfo: any = null;
   private csrf: string = "";
 
   private readonly HEADER_RULES = [
@@ -50,11 +40,9 @@ export class BilibiliAdapter extends CodeAdapter {
 
   async checkAuth(): Promise<AuthResult> {
     try {
-      const res = await this.get<{
-        code: number;
-        data?: BilibiliUserInfo;
-      }>("https://api.bilibili.com/x/web-interface/nav");
-
+      const res = await this.get<{ code: number; data?: any }>(
+        "https://api.bilibili.com/x/web-interface/nav",
+      );
       if (res.code === 0 && res.data?.isLogin) {
         this.userInfo = res.data;
         if (this.runtime.getCookie) {
@@ -93,87 +81,72 @@ export class BilibiliAdapter extends CodeAdapter {
         },
       );
 
-      // 2. 处理封面图 (使用修正后的上传逻辑)
+      // 2. 上传封面 (获取 Bilibili 域名的 URL)
       let coverUrl: string = "";
       if (article.cover) {
         try {
-          logger.info(`[Bilibili] 正在同步封面: ${article.cover}`);
           const uploadRes = await this.uploadImageByUrl(article.cover);
           coverUrl = uploadRes.url;
-          logger.info(`[Bilibili] 封面同步成功: ${coverUrl}`);
         } catch (error) {
-          logger.error(`[Bilibili] 封面同步失败:`, error);
+          console.error(`[Bilibili] 封面上传失败:`, error);
         }
       }
 
-      // 3. 构建新版草稿 Payload (JSON格式)
-      const payload = {
-        title: article.title,
-        content: content,
-        image_url: coverUrl, // 封面图
-        origin_image_urls: coverUrl ? [coverUrl] : [],
-        apply_cover: coverUrl ? 1 : 0, // 关键：开启自定义封面
-        category: 1, // 默认生活区
-        tid: 4, // 对应具体分区
-        original: 1, // 1 原创, 0 转载
-        tags: (article.tags || []).join(","),
-        csrf: this.csrf,
-      };
+      // 3. 使用兼容性最好的接口保存 (绕过 w_rid 校验)
+      // 这里的逻辑是：通过旧接口存入数据，通过跳转 new-edit 强制唤起新版前端渲染
+      const saveUrl = `https://api.bilibili.com/x/article/creative/draft/addupdate`;
 
-      // 4. 调用新版保存接口
-      const response = await this.runtime.fetch(
-        `https://api.bilibili.com/x/dynamic/feed/article/draft/add?csrf=${this.csrf}`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
+      const response = await this.runtime.fetch(saveUrl, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
         },
-      );
+        body: new URLSearchParams({
+          title: article.title,
+          content: content,
+          csrf: this.csrf,
+          tid: "4", // 默认生活区
+          save: "0", // 非直接发布
+          pgc_id: "0",
+          banner_url: coverUrl, // 旧接口封面字段
+          image_url: coverUrl, // 冗余字段，增加新版编辑器识别率
+          origin_image_urls: coverUrl ? JSON.stringify([coverUrl]) : "",
+        }).toString(),
+      });
 
       const res = await response.json();
-      logger.debug("Draft response:", res);
+      const aid = res.data?.aid || res.data?.article_id;
 
-      if (res.code !== 0 || !res.data?.article_id) {
+      if (res.code !== 0 || !aid) {
         throw new Error(res.message || "保存草稿失败");
       }
 
-      // 修正跳转链接为 new-edit
-      const draftUrl = `https://member.bilibili.com/platform/upload/text/new-edit?aid=${res.data.article_id}`;
+      // 4. 关键：强制返回新版编辑器的链接，让 UI 自动处理
+      const draftUrl = `https://member.bilibili.com/platform/upload/text/new-edit?aid=${aid}`;
 
       return this.createResult(true, {
-        postId: String(res.data.article_id),
+        postId: String(aid),
         postUrl: draftUrl,
         draftOnly: true,
       });
     }).catch((error) =>
-      this.createResult(false, {
-        error: (error as Error).message,
-      }),
+      this.createResult(false, { error: (error as Error).message }),
     );
   }
 
-  /**
-   * 修正后的上传逻辑：解决 4100001 参数错误
-   */
   protected async uploadImageByUrl(src: string): Promise<ImageUploadResult> {
     if (!this.csrf) throw new Error("CSRF token 未获取");
-
     const imageResponse = await fetch(src);
-    if (!imageResponse.ok) throw new Error("图片下载失败");
     const imageBlob = await imageResponse.blob();
 
     const formData = new FormData();
-    // 关键修正：新版 upload_bfs 通常识别 'file_up' 或 'binary'
-    // 这里使用你截图中对应的 upload_bfs 逻辑
-    formData.append("file_up", imageBlob, "cover.jpg");
+    formData.append("binary", imageBlob, "image.jpg");
     formData.append("csrf", this.csrf);
-    formData.append("busines", "article"); // 注意是 busines (单s)
-    formData.append("category", "article");
 
-    const uploadUrl = "https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs";
+    // 使用支持度最高的上传接口
+    const uploadUrl =
+      "https://api.bilibili.com/x/article/creative/article/upcover";
     const uploadResponse = await this.runtime.fetch(uploadUrl, {
       method: "POST",
       credentials: "include",
@@ -181,32 +154,12 @@ export class BilibiliAdapter extends CodeAdapter {
     });
 
     const res = await uploadResponse.json();
-
-    // 如果 file_up 仍然报错，尝试换成 'binary'
-    if (res.code === 4100001) {
-      logger.warn("尝试使用 binary 重新上传...");
-      const retryData = new FormData();
-      retryData.append("binary", imageBlob, "cover.jpg");
-      retryData.append("csrf", this.csrf);
-      retryData.append("category", "article");
-      const retryRes = await this.runtime.fetch(uploadUrl, {
-        method: "POST",
-        credentials: "include",
-        body: retryData,
-      });
-      const retryJson = await retryRes.json();
-      if (retryJson.code === 0) return { url: retryJson.data.image_url };
-    }
-
-    if (res.code !== 0 || !res.data?.image_url) {
+    if (res.code !== 0 || !res.data?.url)
       throw new Error(res.message || "图片上传失败");
-    }
 
     return {
-      url: res.data.image_url,
-      attrs: {
-        size: String(res.data.img_size || ""),
-      },
+      url: res.data.url,
+      attrs: { size: String(res.data.size || "") },
     };
   }
 }
