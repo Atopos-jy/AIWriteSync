@@ -261,6 +261,15 @@ export class JuejinAdapter extends CodeAdapter {
         },
       );
 
+      // 添加版权声明
+      markdown += "\n\n";
+      if (article.articleType === "original") {
+        markdown += "**本文为原创文章，未经允许禁止转载。**";
+      } else if (article.url) {
+        markdown +=
+          "**本文转载自：** [" + article.url + "](" + article.url + ")";
+      }
+
       // 6. 创建草稿 (参数来自 DSL juejin.yaml + juejin.transform.ts prepareBody)
       const createResponse = await this.runtime.fetch(
         "https://api.juejin.cn/content_api/v1/article_draft/create",

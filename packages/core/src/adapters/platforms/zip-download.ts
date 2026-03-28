@@ -7,24 +7,29 @@
  *
  * 使用 chrome.downloads API 直接触发下载，避免大文件传递问题
  */
-import type { Article, AuthResult, SyncResult, PlatformMeta } from '../../types'
-import type { PublishOptions } from '../types'
-import { CodeAdapter } from '../code-adapter'
-import { htmlToMarkdown } from '../../lib/turndown'
-import { createLogger } from '../../lib/logger'
-import { parseMarkdownImages } from '../../lib/markdown-images'
-import JSZip from 'jszip'
+import type {
+  Article,
+  AuthResult,
+  SyncResult,
+  PlatformMeta,
+} from "../../types";
+import type { PublishOptions } from "../types";
+import { CodeAdapter } from "../code-adapter";
+import { htmlToMarkdown } from "../../lib/turndown";
+import { createLogger } from "../../lib/logger";
+import { parseMarkdownImages } from "../../lib/markdown-images";
+import JSZip from "jszip";
 
-const logger = createLogger('ZipDownload')
+const logger = createLogger("ZipDownload");
 
 export class ZipDownloadAdapter extends CodeAdapter {
   readonly meta: PlatformMeta = {
-    id: 'zip-download',
-    name: 'Markdown 压缩包',
-    icon: 'https://cdn-icons-png.flaticon.com/512/337/337946.png',
-    homepage: '',
-    capabilities: ['article'],
-  }
+    id: "zip-download",
+    name: "Markdown 压缩包",
+    icon: "https://cdn-icons-png.flaticon.com/512/337/337946.png",
+    homepage: "",
+    capabilities: ["article"],
+  };
 
   /**
    * 本地导出不需要认证
@@ -32,72 +37,99 @@ export class ZipDownloadAdapter extends CodeAdapter {
   async checkAuth(): Promise<AuthResult> {
     return {
       isAuthenticated: true,
-      username: '本地下载',
-    }
+      username: "本地下载",
+    };
   }
 
   /**
    * 导出为 ZIP 压缩包
    */
-  async publish(article: Article, options?: PublishOptions): Promise<SyncResult> {
+  async publish(
+    article: Article,
+    options?: PublishOptions,
+  ): Promise<SyncResult> {
     try {
-      const zip = new JSZip()
-      const imgFolder = zip.folder('images')!
+      const zip = new JSZip();
+      const imgFolder = zip.folder("images")!;
 
       // 获取 Markdown 内容
-      let markdown = article.markdown || htmlToMarkdown(article.html || '')
+      let markdown = article.markdown || htmlToMarkdown(article.html || "");
 
       if (!markdown.trim()) {
         return this.createResult(false, {
-          error: '文章内容为空',
-        })
+          error: "文章内容为空",
+        });
       }
 
       // 添加标题
-      const title = article.title || '未命名文章'
-      if (!markdown.startsWith('# ')) {
-        markdown = `# ${title}\n\n${markdown}`
+      const title = article.title || "未命名文章";
+      if (!markdown.startsWith("# ")) {
+        markdown = `# ${title}\n\n${markdown}`;
+      }
+
+      // 添加标签：在文前添加标签文本
+      if (article.tags && article.tags.length > 0) {
+        const tagsText = article.tags.map((tag) => "#" + tag).join(" ");
+        markdown = `**标签：**${tagsText}\n\n${markdown}`;
+      }
+
+      // 添加摘要：在标签下方添加摘要文本
+      if (article.summary) {
+        markdown = `**摘要：**${article.summary}\n\n${markdown}`;
+      }
+
+      // 添加版权声明：在文末拼接版权信息
+      markdown += "\n\n";
+      if (article.articleType === "original") {
+        markdown += "**本文为原创文章，未经允许禁止转载。**";
+      } else if (article.url) {
+        markdown +=
+          "**本文转载自：** [" + article.url + "](" + article.url + ")";
       }
 
       // 处理图片：下载并替换为相对路径
       const { processedMarkdown, imageCount } = await this.processImagesForZip(
         markdown,
         imgFolder,
-        options?.onImageProgress
-      )
+        options?.onImageProgress,
+      );
 
       // 写入 Markdown 文件
-      zip.file('article.md', processedMarkdown)
+      zip.file("article.md", processedMarkdown);
 
       // 生成 ZIP Blob
       const blob = await zip.generateAsync({
-        type: 'blob',
-        compression: 'DEFLATE',
+        type: "blob",
+        compression: "DEFLATE",
         compressionOptions: { level: 6 },
-      })
+      });
 
       // 使用 runtime.downloads 下载
-      const filename = this.sanitizeFilename(title) + '.zip'
+      const filename = this.sanitizeFilename(title) + ".zip";
 
       if (!this.runtime.downloads) {
         return this.createResult(false, {
-          error: '当前环境不支持下载功能',
-        })
+          error: "当前环境不支持下载功能",
+        });
       }
 
-      const downloadId = await this.runtime.downloads.download(blob, filename, true)
-      logger.info(`Download started: ${filename}, id: ${downloadId}`)
+      const downloadId = await this.runtime.downloads.download(
+        blob,
+        filename,
+        true,
+      );
+      logger.info(`Download started: ${filename}, id: ${downloadId}`);
 
       return this.createResult(true, {
         postId: String(downloadId),
-        postUrl: '', // 本地下载，无链接
+        postUrl: "", // 本地下载，无链接
         message: `已下载 ${filename}（${imageCount} 张图片）`,
-      })
+      });
     } catch (error) {
-      logger.error('ZIP download failed:', error)
+      logger.error("ZIP download failed:", error);
       return this.createResult(false, {
         error: (error as Error).message,
-      })
+      });
     }
   }
 
@@ -107,93 +139,101 @@ export class ZipDownloadAdapter extends CodeAdapter {
   private async processImagesForZip(
     markdown: string,
     imgFolder: JSZip,
-    onProgress?: (current: number, total: number) => void
+    onProgress?: (current: number, total: number) => void,
   ): Promise<{ processedMarkdown: string; imageCount: number }> {
-    const matches = parseMarkdownImages(markdown)
+    const matches = parseMarkdownImages(markdown);
 
     if (matches.length === 0) {
-      return { processedMarkdown: markdown, imageCount: 0 }
+      return { processedMarkdown: markdown, imageCount: 0 };
     }
 
-    logger.info(`Found ${matches.length} images to process`)
+    logger.info(`Found ${matches.length} images to process`);
 
     // 生成时间戳前缀（精确到秒）
-    const timestamp = Math.floor(Date.now() / 1000)
+    const timestamp = Math.floor(Date.now() / 1000);
 
-    let processedMarkdown = markdown
-    let imageIndex = 0
-    let completed = 0
-    const urlToFilename = new Map<string, string>() // 去重：相同 URL 使用相同文件名
+    let processedMarkdown = markdown;
+    let imageIndex = 0;
+    let completed = 0;
+    const urlToFilename = new Map<string, string>(); // 去重：相同 URL 使用相同文件名
 
-    const uniqueUrls: string[] = []
+    const uniqueUrls: string[] = [];
     for (const { src } of matches) {
-      if (src.startsWith('data:')) {
-        logger.debug('Skipping data URI image')
-        continue
+      if (src.startsWith("data:")) {
+        logger.debug("Skipping data URI image");
+        continue;
       }
       if (!urlToFilename.has(src)) {
-        urlToFilename.set(src, '')
-        uniqueUrls.push(src)
+        urlToFilename.set(src, "");
+        uniqueUrls.push(src);
       }
     }
 
     if (uniqueUrls.length === 0) {
-      return { processedMarkdown: markdown, imageCount: 0 }
+      return { processedMarkdown: markdown, imageCount: 0 };
     }
 
     const downloadOne = async (src: string) => {
       try {
         const response = await this.runtime.fetch(src, {
-          credentials: 'omit',
-        })
+          credentials: "omit",
+        });
 
         if (!response.ok) {
-          logger.warn(`Failed to download image: ${src}, status: ${response.status}`)
-          return
+          logger.warn(
+            `Failed to download image: ${src}, status: ${response.status}`,
+          );
+          return;
         }
 
-        const blob = await response.blob()
-        const ext = this.getImageExtension(src, blob.type)
-        imageIndex++
-        const filename = `image_${timestamp}_${String(imageIndex).padStart(3, '0')}.${ext}`
+        const blob = await response.blob();
+        const ext = this.getImageExtension(src, blob.type);
+        imageIndex++;
+        const filename = `image_${timestamp}_${String(imageIndex).padStart(3, "0")}.${ext}`;
 
-        imgFolder.file(filename, blob)
-        urlToFilename.set(src, filename)
+        imgFolder.file(filename, blob);
+        urlToFilename.set(src, filename);
 
-        logger.debug(`Downloaded image: ${filename}`)
+        logger.debug(`Downloaded image: ${filename}`);
       } catch (error) {
-        logger.warn(`Failed to download image: ${src}`, error)
+        logger.warn(`Failed to download image: ${src}`, error);
       } finally {
-        completed++
-        onProgress?.(completed, uniqueUrls.length)
+        completed++;
+        onProgress?.(completed, uniqueUrls.length);
       }
-    }
+    };
 
     const runPool = async (limit: number) => {
-      let cursor = 0
-      const workers = Array.from({ length: Math.min(limit, uniqueUrls.length) }, async () => {
-        while (cursor < uniqueUrls.length) {
-          const current = cursor
-          cursor++
-          await downloadOne(uniqueUrls[current])
-        }
-      })
-      await Promise.all(workers)
-    }
+      let cursor = 0;
+      const workers = Array.from(
+        { length: Math.min(limit, uniqueUrls.length) },
+        async () => {
+          while (cursor < uniqueUrls.length) {
+            const current = cursor;
+            cursor++;
+            await downloadOne(uniqueUrls[current]);
+          }
+        },
+      );
+      await Promise.all(workers);
+    };
 
-    await runPool(4)
+    await runPool(4);
 
     for (const { full, alt, src } of matches) {
-      const filename = urlToFilename.get(src)
+      const filename = urlToFilename.get(src);
       if (filename) {
-        processedMarkdown = processedMarkdown.replace(full, `![${alt}](images/${filename})`)
+        processedMarkdown = processedMarkdown.replace(
+          full,
+          `![${alt}](images/${filename})`,
+        );
       }
     }
 
     return {
       processedMarkdown,
       imageCount: Array.from(urlToFilename.values()).filter(Boolean).length,
-    }
+    };
   }
 
   /**
@@ -202,39 +242,41 @@ export class ZipDownloadAdapter extends CodeAdapter {
   private getImageExtension(url: string, mimeType: string): string {
     // 优先从 MIME 类型获取
     const mimeMap: Record<string, string> = {
-      'image/jpeg': 'jpg',
-      'image/png': 'png',
-      'image/gif': 'gif',
-      'image/webp': 'webp',
-      'image/svg+xml': 'svg',
-      'image/bmp': 'bmp',
-      'image/x-icon': 'ico',
-    }
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/gif": "gif",
+      "image/webp": "webp",
+      "image/svg+xml": "svg",
+      "image/bmp": "bmp",
+      "image/x-icon": "ico",
+    };
 
     if (mimeType && mimeMap[mimeType]) {
-      return mimeMap[mimeType]
+      return mimeMap[mimeType];
     }
 
     // 从 URL 提取
-    const urlMatch = url.match(/\.(png|jpe?g|gif|webp|svg|bmp|ico)(?:\?|$)/i)
+    const urlMatch = url.match(/\.(png|jpe?g|gif|webp|svg|bmp|ico)(?:\?|$)/i);
     if (urlMatch) {
-      return urlMatch[1].toLowerCase().replace('jpeg', 'jpg')
+      return urlMatch[1].toLowerCase().replace("jpeg", "jpg");
     }
 
     // 默认 png
-    return 'png'
+    return "png";
   }
 
   /**
    * 清理文件名，移除非法字符
    */
   private sanitizeFilename(name: string): string {
-    return name
-      .replace(/[<>:"/\\|?*]/g, '_') // Windows 非法字符
-      .replace(/[\x00-\x1f]/g, '') // 控制字符
-      .replace(/\.+$/, '') // 末尾的点
-      .trim()
-      .slice(0, 200) // 限制长度
-      || 'article'
+    return (
+      name
+        .replace(/[<>:"/\\|?*]/g, "_") // Windows 非法字符
+        .replace(/[\x00-\x1f]/g, "") // 控制字符
+        .replace(/\.+$/, "") // 末尾的点
+        .trim()
+        .slice(0, 200) || // 限制长度
+      "article"
+    );
   }
 }

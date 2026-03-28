@@ -140,17 +140,38 @@ export class JianshuAdapter extends CodeAdapter {
       const draftId = createData.id;
       logger.debug("Draft created:", draftId);
 
-      // 选择内容格式：优先使用html，其次是content，最后是markdown
-      let content = article.html || article.content || article.markdown || "";
-
-      // 如果有摘要，添加到正文开头
-      if (article.summary) {
-        content = `<blockquote>${article.summary}</blockquote>\n${content}`;
+      // 3. 封面图处理
+      let coverUrl: string | null = null;
+      if (article.cover) {
+        try {
+          logger.debug("Uploading cover image:", article.cover);
+          const coverResult = await this.uploadImageByUrl(article.cover);
+          coverUrl = coverResult.url;
+          logger.debug("Cover uploaded successfully:", coverUrl);
+        } catch (error) {
+          logger.error("Failed to upload cover image:", error);
+        }
       }
 
-      // 如果有作者信息，添加到正文开头
+      // 4. 内容处理
+      let content = article.html || article.content || article.markdown || "";
+
+      // 标签处理：简书不支持标签字段，在文前添加标签文本
+      if (article.tags && article.tags.length > 0) {
+        const tagsText = article.tags.map((tag) => "#" + tag).join(" ");
+        content = "<p><strong>标签：</strong>" + tagsText + "</p>\n" + content;
+      }
+
+      // 摘要处理：简书不支持摘要字段，在标签下方添加摘要文本
+      if (article.summary) {
+        content =
+          "<p><strong>摘要：</strong>" + article.summary + "</p>\n\n" + content;
+      }
+
+      // 作者信息处理
       if (article.author) {
-        content = `<p><strong>作者：${article.author}</strong></p>\n${content}`;
+        content =
+          "<p><strong>作者：" + article.author + "</strong></p>\n\n" + content;
       }
 
       // Jianshu-specific: remove empty paragraphs, remove trailing br
@@ -171,7 +192,31 @@ export class JianshuAdapter extends CodeAdapter {
         },
       );
 
-      // 7. 更新草稿内容
+      // 添加版权声明
+      content += "\n\n";
+      if (article.articleType === "original") {
+        content += "<p><strong>本文为原创文章，未经允许禁止转载。</strong></p>";
+      } else if (article.url) {
+        content +=
+          '<p><strong>本文转载自：</strong><a href="' +
+          article.url +
+          '" target="_blank">' +
+          article.url +
+          "</a></p>";
+      }
+
+      // 5. 更新草稿内容
+      const updateBody: Record<string, any> = {
+        title: article.title,
+        content: content,
+        autosave_control: 1,
+      };
+
+      // 如果有封面图，添加封面字段
+      if (coverUrl) {
+        updateBody["image_url"] = coverUrl;
+      }
+
       const updateResponse = await this.runtime.fetch(
         `https://www.jianshu.com/author/notes/${draftId}`,
         {
@@ -181,14 +226,12 @@ export class JianshuAdapter extends CodeAdapter {
             "Content-Type": "application/json",
             Referer: "https://www.jianshu.com/writer",
           },
-          body: JSON.stringify({
-            title: article.title,
-            content: content,
-          }),
+          body: JSON.stringify(updateBody),
         },
       );
 
-      const updateData = (await updateResponse.json()) as { id?: number };
+      const updateData = (await updateResponse.json()) as any;
+      logger.debug("Update response:", updateData);
 
       if (!updateData.id) {
         throw new Error("更新草稿失败");
@@ -204,6 +247,7 @@ export class JianshuAdapter extends CodeAdapter {
         draftOnly: options?.draftOnly ?? true,
       });
     } catch (error) {
+      logger.error("Publish failed:", error);
       return this.createResult(false, {
         error: (error as Error).message,
       });

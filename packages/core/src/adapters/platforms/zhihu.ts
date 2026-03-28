@@ -141,11 +141,30 @@ export class ZhihuAdapter extends CodeAdapter {
 
       content = this.transformContent(content);
 
-      // 3. 注入元信息（作者/标签）
-      if (article.summary)
-        content = `<blockquote>${article.summary}</blockquote>\n${content}`;
-      if (article.author)
-        content = `<p><strong>作者：${article.author}</strong></p>\n${content}`;
+      // 添加版权声明
+      content += "\n\n";
+      if (article.articleType === "original") {
+        content += "<p><strong>本文为原创文章，未经允许禁止转载。</strong></p>";
+      } else if (article.url) {
+        content += "<p><strong>本文转载自：</strong>" + article.url + "</p>";
+      }
+
+      // 3. 注入元信息（标签/摘要/作者）
+      // 标签处理：知乎不支持标签字段，在文前添加标签文本
+      if (article.tags && article.tags.length > 0) {
+        const tagsText = article.tags.map((tag) => "#" + tag).join(" ");
+        content = `<p><strong>标签：</strong>${tagsText}</p>\n\n${content}`;
+      }
+
+      // 摘要处理：使用blockquote标签显示摘要
+      if (article.summary) {
+        content = `<blockquote>${article.summary}</blockquote>\n\n${content}`;
+      }
+
+      // 作者信息处理
+      if (article.author) {
+        content = `<p><strong>作者：${article.author}</strong></p>\n\n${content}`;
+      }
 
       // 4. 处理封面图 (核心修复部分)
       let coverImageUrl: string | undefined;

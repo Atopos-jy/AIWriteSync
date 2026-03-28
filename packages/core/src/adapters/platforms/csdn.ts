@@ -204,13 +204,12 @@ export class CSDNAdapter extends CodeAdapter {
         }
       }
 
+      // ==============================================
+      // 🔥 全字段同步处理
+      // ==============================================
+
       // 选择内容格式：优先使用markdown，其次是content，最后是html
       let markdown = article.markdown || article.content || article.html || "";
-
-      // 如果有作者信息，添加到正文开头
-      if (article.author) {
-        markdown = `**作者：${article.author}**\n\n${markdown}`;
-      }
 
       // Process images in markdown
       markdown = await this.processImages(
@@ -223,7 +222,39 @@ export class CSDNAdapter extends CodeAdapter {
       );
 
       // Get HTML content (CSDN API needs both markdown and HTML)
-      const htmlContent = article.html || "";
+      let htmlContent = article.html || "";
+
+      // 处理HTML内容
+      htmlContent = await this.processImages(
+        htmlContent,
+        (src) => this.uploadImageByUrl(src),
+        {
+          skipPatterns: ["csdnimg.cn", "csdn.net"],
+          onProgress: options?.onImageProgress,
+        },
+      );
+
+      // CSDN支持标签和摘要，直接使用API字段
+      // 按照要求在文末添加版权声明
+      let finalMarkdown = markdown;
+      let finalHtml = htmlContent;
+
+      // 版权声明处理
+      const copyright = "\n\n";
+      if (article.articleType === "original") {
+        finalMarkdown +=
+          copyright + "**原创声明：** 本文为原创内容，未经授权禁止转载。";
+        finalHtml +=
+          copyright +
+          "<p><strong>原创声明：</strong>本文为原创内容，未经授权禁止转载。</p>";
+      } else if (article.url) {
+        finalMarkdown +=
+          copyright +
+          `**转载声明：** 本文转载自 [${article.url}](${article.url})`;
+        finalHtml +=
+          copyright +
+          `<p><strong>转载声明：</strong>本文转载自 <a href="${article.url}" target="_blank">${article.url}</a></p>`;
+      }
 
       // 处理封面图片
       let coverImages: string[] = [];
@@ -247,6 +278,12 @@ export class CSDNAdapter extends CodeAdapter {
       const apiPath = "/blog-console-api/v3/mdeditor/saveArticle";
       const headers = await this.signRequest(apiPath);
 
+      // 设置文章类型：原创或转载
+      const articleType =
+        article.articleType === "original" ? "original" : "reprint";
+      const originalLink =
+        articleType === "reprint" && article.url ? article.url : "";
+
       const response = await this.runtime.fetch(
         `https://bizapi.csdn.net${apiPath}`,
         {
@@ -255,16 +292,16 @@ export class CSDNAdapter extends CodeAdapter {
           headers,
           body: JSON.stringify({
             title: article.title,
-            markdowncontent: markdown,
-            content: htmlContent,
+            markdowncontent: finalMarkdown,
+            content: finalHtml,
             readType: "public",
             level: 0,
             tags: article.tags?.join(",") || "",
             brief_content: article.summary || "",
             status: 2, // 草稿
-            categories: "",
-            type: "original",
-            original_link: "",
+            categories: article.category || "",
+            type: articleType,
+            original_link: originalLink,
             authorized_status: false,
             not_auto_saved: "1",
             source: "pc_mdeditor",
