@@ -90,15 +90,18 @@ function getAuthenticatedPlatforms(platforms: Platform[]) {
 /**
  * 将平台数据与登录状态结合
  */
-function mergePlatformsWithAuth(platforms: Platform[], authCache: Record<string, any> = {}) {
+function mergePlatformsWithAuth(
+  platforms: Platform[],
+  authCache: Record<string, any> = {},
+) {
   const now = Date.now();
-  
-  return platforms.map(platform => {
+
+  return platforms.map((platform) => {
     const authItem = authCache[platform.id];
     // 检查缓存是否有效（已登录5分钟，未登录30秒）
     const cacheTTL = authItem?.isAuthenticated ? 5 * 60 * 1000 : 30 * 1000;
     const cacheValid = authItem && now - authItem.timestamp < cacheTTL;
-    
+
     return {
       ...platform,
       isAuthenticated: cacheValid ? authItem.isAuthenticated : false,
@@ -607,6 +610,7 @@ export function EditorApp() {
             content,
             cover: data.article.cover || "",
             tags: data.article.tags || [],
+            url: data.article.url || "",
             category: data.article.category || "",
             articleType: data.article.articleType || "",
             publishDate:
@@ -715,17 +719,17 @@ export function EditorApp() {
         if (storageResult.platforms && Array.isArray(storageResult.platforms)) {
           const platforms = storageResult.platforms;
           const authCache = storageResult.authCache || {};
-          
+
           // 将平台数据与登录状态结合
-          const platformsWithAuth = mergePlatformsWithAuth(platforms, authCache);
+          const platformsWithAuth = mergePlatformsWithAuth(
+            platforms,
+            authCache,
+          );
 
           setPlatforms(platformsWithAuth);
-          
+
           // 自动勾选已登录平台
-          console.log(
-            "fetchPlatforms: 使用缓存 platforms",
-            platformsWithAuth,
-          );
+          console.log("fetchPlatforms: 使用缓存 platforms", platformsWithAuth);
           const authenticated = getAuthenticatedPlatforms(platformsWithAuth);
           const authenticatedIds = authenticated.map((p: Platform) => p.id);
           setSelectedPlatforms(new Set(authenticatedIds));

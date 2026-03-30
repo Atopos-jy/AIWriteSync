@@ -194,7 +194,17 @@ export class CSDNAdapter extends CodeAdapter {
     options?: PublishOptions,
   ): Promise<SyncResult> {
     return this.withHeaderRules(this.HEADER_RULES, async () => {
-      logger.info("Starting publish...");
+      logger.info("[CSDN] Starting publish process");
+      logger.debug("[CSDN] Article data:", {
+        title: article.title,
+        author: article.author,
+        summary: article.summary,
+        tags: article.tags,
+        category: article.category,
+        articleType: article.articleType,
+        url: article.url,
+        hasCover: !!article.cover,
+      });
 
       // 1. 确保已登录
       if (!this.userInfo) {
@@ -274,6 +284,13 @@ export class CSDNAdapter extends CodeAdapter {
         }
       }
 
+      // 检查标题长度（CSDN要求标题至少5个字符）
+      let finalTitle = article.title;
+      if (finalTitle.length < 5) {
+        finalTitle = finalTitle + " - 补充标题以满足长度要求";
+        logger.warn("标题过短，已自动补充:", finalTitle);
+      }
+
       // Generate signature and save article
       const apiPath = "/blog-console-api/v3/mdeditor/saveArticle";
       const headers = await this.signRequest(apiPath);
@@ -284,6 +301,44 @@ export class CSDNAdapter extends CodeAdapter {
       const originalLink =
         articleType === "reprint" && article.url ? article.url : "";
 
+      // 保存文章请求
+      logger.info("[CSDN] Saving article");
+      const saveBody = {
+        title: finalTitle,
+        markdowncontent:
+          finalMarkdown.length > 200
+            ? finalMarkdown.substring(0, 200) + "..."
+            : finalMarkdown,
+        content:
+          finalHtml.length > 200
+            ? finalHtml.substring(0, 200) + "..."
+            : finalHtml,
+        readType: "public",
+        level: 0,
+        tags: article.tags?.join(",") || "",
+        description: article.summary || "",
+        brief_content: article.summary || "",
+        status: 2, // 草稿
+        categories: article.category || "",
+        category: article.category || "",
+        type: articleType,
+        original_link: originalLink,
+        authorized_status: false,
+        not_auto_saved: "1",
+        source: "pc_mdeditor",
+        cover_images: coverImages,
+        cover_type: coverImages.length > 0 ? 1 : 0,
+        is_new: 1,
+        vote_id: 0,
+        resource_id: "",
+        pubStatus: "draft",
+        creator_activity_id: "",
+      };
+
+      logger.debug("[CSDN] Save article request:", saveBody);
+      logger.info("[CSDN] Description field value:", article.summary);
+      logger.info("[CSDN] Brief_content field value:", article.summary);
+
       const response = await this.runtime.fetch(
         `https://bizapi.csdn.net${apiPath}`,
         {
@@ -291,15 +346,17 @@ export class CSDNAdapter extends CodeAdapter {
           credentials: "include",
           headers,
           body: JSON.stringify({
-            title: article.title,
+            title: finalTitle,
             markdowncontent: finalMarkdown,
             content: finalHtml,
             readType: "public",
             level: 0,
             tags: article.tags?.join(",") || "",
+            description: article.summary || "",
             brief_content: article.summary || "",
             status: 2, // 草稿
             categories: article.category || "",
+            category: article.category || "",
             type: articleType,
             original_link: originalLink,
             authorized_status: false,
@@ -316,21 +373,32 @@ export class CSDNAdapter extends CodeAdapter {
         },
       );
 
+      logger.info("[CSDN] Save article response status:", response.status);
       const res = (await response.json()) as {
         code: number;
         message?: string;
         msg?: string;
-        data?: { id: string };
+        data?: {
+          id: string;
+          url?: string;
+          description?: string;
+        };
       };
 
-      logger.debug("Save response:", res);
+      logger.info("[CSDN] Save response:", res);
+      logger.info("[CSDN] Response description field:", res.data?.description);
 
       if (res.code !== 200 || !res.data?.id) {
+        logger.error("[CSDN] Save draft failed:", res.msg || res.message);
         throw new Error(res.msg || res.message || "保存草稿失败");
       }
 
       const postId = res.data.id;
-      const draftUrl = `https://editor.csdn.net/md?articleId=${postId}`;
+      const postUrl =
+        res.data?.url || `https://editor.csdn.net/md?articleId=${postId}`;
+
+      logger.info("[CSDN] Article saved successfully:", postId, postUrl);
+      const draftUrl = postUrl;
 
       return this.createResult(true, {
         postId: postId,
@@ -367,7 +435,7 @@ export class CSDNAdapter extends CodeAdapter {
    */
   protected async uploadImageByUrl(src: string): Promise<ImageUploadResult> {
     // 1. 下载图片
-    const imageResponse = await fetch(src);
+    const imageResponse = await this.runtime.fetch(src);
     if (!imageResponse.ok) {
       throw new Error("图片下载失败: " + src);
     }

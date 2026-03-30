@@ -1,5 +1,6 @@
 /**
- * 掘金适配器
+ * 掘金适配器 - 标准同步实现
+ * 参考简书等平台的标准实现模式，添加详细日志
  */
 import { CodeAdapter, type ImageUploadResult } from "../code-adapter";
 import type {
@@ -18,23 +19,23 @@ const logger = createLogger("Juejin");
 const IMAGEX_AID = "2608";
 const IMAGEX_SERVICE_ID = "73owjymdk6";
 
-// 生成 UUID (用于 ImageX API)
+// 生成标准 v4 UUID (用于 ImageX API)
 function generateUUID(): string {
-  return (
-    "xxxxxxxxxxxxxxxx".replace(/x/g, () =>
-      Math.floor(Math.random() * 16).toString(16),
-    ) + Date.now().toString()
-  );
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
-// ImageX Token 响应类型
+// 接口定义
 interface ImageXTokenResponse {
   data?: {
     token: {
       AccessKeyId: string;
       SecretAccessKey: string;
       SessionToken: string;
-      ExpiredTime: string; // ISO 日期字符串 "2026-01-14T00:15:24+08:00"
+      ExpiredTime: string;
       CurrentTime: string;
     };
   };
@@ -42,61 +43,20 @@ interface ImageXTokenResponse {
   err_msg?: string;
 }
 
-// 解析后的 Token
 interface ImageXToken {
   AccessKeyId: string;
   SecretAccessKey: string;
   SessionToken: string;
-  ExpiredTime: number; // Unix 时间戳（毫秒）
+  ExpiredTime: number;
 }
 
-// ImageX ApplyUpload 响应类型
 interface ImageXApplyUploadResponse {
-  ResponseMetadata: {
-    RequestId: string;
-    Action: string;
-    Version: string;
-    Service: string;
-    Region: string;
-  };
   Result: {
-    RequestId: string;
     UploadAddress: {
-      StoreInfos: Array<{
-        StoreUri: string;
-        Auth: string;
-        UploadID: string;
-      }>;
+      StoreInfos: Array<{ StoreUri: string; Auth: string; UploadID: string }>;
       UploadHosts: string[];
       SessionKey: string;
     };
-  };
-}
-
-// ImageX CommitUpload 响应类型
-interface ImageXCommitUploadResponse {
-  ResponseMetadata: {
-    RequestId: string;
-    Action: string;
-    Version: string;
-    Service: string;
-    Region: string;
-  };
-  Result: {
-    RequestId: string;
-    Results: Array<{
-      Uri: string;
-      UriStatus: number;
-    }>;
-    PluginResult: Array<{
-      FileName: string;
-      ImageUri: string;
-      ImageWidth: number;
-      ImageHeight: number;
-      ImageMd5: string;
-      ImageFormat: string;
-      ImageSize: number;
-    }>;
   };
 }
 
@@ -116,38 +76,29 @@ export class JuejinAdapter extends CodeAdapter {
     ],
   };
 
-  /** 预处理配置: 掘金使用 Markdown 格式 */
-  readonly preprocessConfig = {
-    outputFormat: "markdown" as const,
-  };
+  readonly preprocessConfig = { outputFormat: "markdown" as const };
 
   private cachedCsrfToken: string | null = null;
   private cachedImageXToken: ImageXToken | null = null;
   private imageXTokenExpiry: number = 0;
   private uuid: string = generateUUID();
 
-  /** 掘金 API 需要的 Header 规则 */
   private readonly HEADER_RULES = [
     {
       urlFilter: "*://api.juejin.cn/*",
-      headers: {
-        Origin: "https://juejin.cn",
-        Referer: "https://juejin.cn/",
-      },
+      headers: { Origin: "https://juejin.cn", Referer: "https://juejin.cn/" },
       resourceTypes: ["xmlhttprequest"],
     },
     {
       urlFilter: "*://imagex.bytedanceapi.com/*",
-      headers: {
-        Origin: "https://juejin.cn",
-        Referer: "https://juejin.cn/",
-      },
+      headers: { Origin: "https://juejin.cn", Referer: "https://juejin.cn/" },
       resourceTypes: ["xmlhttprequest"],
     },
   ];
 
   async checkAuth(): Promise<AuthResult> {
     try {
+      console.log("[Juejin] 开始身份验证...");
       const response = await this.runtime.fetch(
         "https://api.juejin.cn/user_api/v1/user/get",
         {
@@ -155,16 +106,11 @@ export class JuejinAdapter extends CodeAdapter {
           credentials: "include",
         },
       );
-
-      const data = (await response.json()) as {
-        data?: {
-          user_id?: string;
-          user_name?: string;
-          avatar_large?: string;
-        };
-      };
-
+      console.log("[Juejin] 身份验证响应状态:", response.status);
+      const data = await response.json();
+      console.log("[Juejin] 身份验证响应数据:", data);
       if (data.data?.user_id) {
+        console.log("[Juejin] 身份验证成功:", data.data.user_name);
         return {
           isAuthenticated: true,
           userId: data.data.user_id,
@@ -172,360 +118,405 @@ export class JuejinAdapter extends CodeAdapter {
           avatar: data.data.avatar_large,
         };
       }
-
+      console.log("[Juejin] 身份验证失败: 没有用户ID");
       return { isAuthenticated: false };
     } catch (error) {
-      logger.debug("checkAuth: not logged in -", error);
+      console.error("[Juejin] 身份验证错误:", error);
       return { isAuthenticated: false, error: (error as Error).message };
     }
   }
 
   /**
-   * 获取 CSRF Token (参考 DSL juejin.transform.ts)
+   * 获取 CSRF Token - 多种方式组合获取
    */
   private async getCsrfToken(): Promise<string> {
     if (this.cachedCsrfToken) {
+      console.log("[Juejin] 使用缓存的 CSRF Token");
       return this.cachedCsrfToken;
     }
 
-    // 使用 runtime.fetch 以便 extension 能正确处理
-    const response = await this.runtime.fetch(
-      "https://api.juejin.cn/user_api/v1/sys/token",
-      {
-        method: "HEAD",
-        headers: {
-          "x-secsdk-csrf-request": "1",
-          "x-secsdk-csrf-version": "1.2.10",
+    console.log("[Juejin] 获取 CSRF Token...");
+
+    // 方法1: 直接从浏览器Cookie读取（仿照简书实现）
+    try {
+      console.log("[Juejin] 方法1: 从浏览器Cookie读取Token");
+      if (this.runtime.cookies && this.runtime.cookies.get) {
+        const cookies = await this.runtime.cookies.get(".juejin.cn");
+        console.log("[Juejin] 获取到的Cookie数量:", cookies.length);
+
+        // 尝试多种可能的Cookie名称
+        const possibleNames = [
+          "passport_csrf_token",
+          "passport_csrf_token_default",
+          "csrfToken",
+          "x-secsdk-csrf-token",
+          "X-SecSDK-CSRF-Token",
+          "csrf-token",
+          "_csrf",
+          "token",
+          "X-Ware-Csrf-Token",
+          "csrf_session_id",
+        ];
+
+        for (const name of possibleNames) {
+          const cookie = cookies.find((c) => c.name === name);
+          if (cookie && cookie.value) {
+            this.cachedCsrfToken = cookie.value;
+            console.log(
+              `[Juejin] 从Cookie获取到Token (${name}):`,
+              this.cachedCsrfToken,
+            );
+            return this.cachedCsrfToken;
+          }
+        }
+
+        // 输出所有Cookie名称以便调试
+        const cookieNames = cookies.map((c) => c.name).join(", ");
+        console.log("[Juejin] 所有Cookie名称:", cookieNames);
+      } else {
+        console.error("[Juejin] runtime.cookies.get 方法不可用");
+      }
+    } catch (error) {
+      console.error("[Juejin] 方法1失败:", error);
+    }
+
+    // 方法2: 调用API获取响应头中的X-Ware-Csrf-Token
+    try {
+      console.log("[Juejin] 方法2: 调用API获取响应头中的X-Ware-Csrf-Token");
+      const response = await this.runtime.fetch(
+        "https://api.juejin.cn/user_api/v1/user/get",
+        {
+          method: "GET",
+          credentials: "include",
+          headers: {
+            Origin: "https://juejin.cn",
+            Referer: "https://juejin.cn/",
+          },
         },
-        credentials: "include",
-      },
-    );
+      );
 
-    const wareToken = response.headers.get("x-ware-csrf-token");
-    if (!wareToken) {
-      logger.warn("CSRF token not found in response headers");
-      throw new Error("Failed to get CSRF token");
+      console.log("[Juejin] API响应状态:", response.status);
+
+      // 尝试获取响应头中的X-Ware-Csrf-Token
+      const wareToken =
+        response.headers.get("x-ware-csrf-token") ||
+        response.headers.get("X-Ware-Csrf-Token");
+      console.log("[Juejin] 从响应头获取的X-Ware-Csrf-Token:", wareToken);
+
+      if (wareToken) {
+        // 掘金的Token格式通常是 "0,token_value"
+        const parts = wareToken.split(",");
+        this.cachedCsrfToken = parts.length >= 2 ? parts[1] : wareToken;
+        console.log("[Juejin] 解析后的Token:", this.cachedCsrfToken);
+        return this.cachedCsrfToken;
+      }
+    } catch (error) {
+      console.error("[Juejin] 方法2失败:", error);
     }
 
-    // Token 格式: "0,{actual_token},86370000,success,{session_id}"
-    const parts = wareToken.split(",");
-    if (parts.length < 2) {
-      throw new Error("Invalid CSRF token format");
+    // 方法3: 访问掘金编辑器页面，提取页面中的Token（备用方法）
+    try {
+      console.log("[Juejin] 方法3: 访问掘金编辑器页面获取Token");
+      const response = await this.runtime.fetch(
+        "https://juejin.cn/editor/drafts/new",
+        {
+          method: "GET",
+          credentials: "include",
+          headers: {
+            Origin: "https://juejin.cn",
+            Referer: "https://juejin.cn/",
+          },
+        },
+      );
+
+      console.log("[Juejin] 编辑器页面响应状态:", response.status);
+      const html = await response.text();
+
+      // 尝试多种模式提取Token
+      const patterns = [
+        /csrfToken\s*=\s*['"]([^'"]+)['"]/,
+        /x-secsdk-csrf-token\s*=\s*['"]([^'"]+)['"]/,
+        /csrf-token\s*=\s*['"]([^'"]+)['"]/,
+        /_csrf\s*=\s*['"]([^'"]+)['"]/,
+        /X-Ware-Csrf-Token\s*=\s*['"]([^'"]+)['"]/,
+      ];
+
+      for (const pattern of patterns) {
+        const match = html.match(pattern);
+        if (match) {
+          this.cachedCsrfToken = match[1];
+          console.log(
+            `[Juejin] 从页面内容提取到 Token (模式: ${pattern.source}):`,
+            this.cachedCsrfToken,
+          );
+          return this.cachedCsrfToken;
+        }
+      }
+    } catch (error) {
+      console.error("[Juejin] 方法3失败:", error);
     }
 
-    this.cachedCsrfToken = parts[1];
-    logger.debug(
-      "Got CSRF token:",
-      this.cachedCsrfToken.substring(0, 10) + "...",
-    );
-    return this.cachedCsrfToken;
+    // 所有方法都失败
+    console.error("[Juejin] 所有获取CSRF Token的方法都失败了");
+    throw new Error("无法获取掘金 CSRF Token，请检查是否已登录掘金账号");
+  }
+
+  private async getValidCategoryId(categoryName?: string): Promise<string> {
+    console.log("[Juejin] 获取分类 ID，分类名称:", categoryName);
+    try {
+      const res = await this.runtime.fetch(
+        "https://api.juejin.cn/tag_api/v1/query_category_briefs",
+        {
+          method: "GET",
+          credentials: "include",
+        },
+      );
+      console.log("[Juejin] 分类列表响应状态:", res.status);
+      const { data } = await res.json();
+      console.log("[Juejin] 分类列表数据:", data);
+      const match = data.find((c: any) => c.category_name === categoryName);
+      const categoryId = match ? match.category_id : "6809635626879549454"; // 默认：前端
+      console.log("[Juejin] 使用分类 ID:", categoryId);
+      return categoryId;
+    } catch (error) {
+      console.error("[Juejin] 获取分类 ID 失败:", error);
+      return "6809635626879549454";
+    }
+  }
+
+  private async convertTagsToIds(tags: string[]): Promise<string[]> {
+    console.log("[Juejin] 转换标签为 ID:", tags);
+    if (!tags || tags.length === 0) {
+      console.log("[Juejin] 没有标签，使用默认标签");
+      return ["6809640407484334093"]; // 默认：程序员
+    }
+    const ids: string[] = [];
+    try {
+      for (const tag of tags.slice(0, 3)) {
+        console.log("[Juejin] 搜索标签:", tag);
+        const res = await this.runtime.fetch(
+          `https://api.juejin.cn/tag_api/v1/query_tag?key_word=${encodeURIComponent(tag)}&cursor=0&count=1`,
+          { method: "GET", credentials: "include" },
+        );
+        console.log("[Juejin] 标签搜索响应状态:", res.status);
+        const data = await res.json();
+        console.log("[Juejin] 标签搜索数据:", data);
+        if (data.data && data.data.length > 0) {
+          ids.push(data.data[0].tag_id);
+          console.log("[Juejin] 找到标签 ID:", data.data[0].tag_id);
+        } else {
+          console.log("[Juejin] 标签未找到:", tag);
+        }
+      }
+    } catch (error) {
+      console.error("[Juejin] 标签转换失败:", error);
+    }
+    const finalIds = ids.length > 0 ? ids : ["6809640407484334093"];
+    console.log("[Juejin] 最终标签 ID 列表:", finalIds);
+    return finalIds;
   }
 
   async publish(
     article: Article,
     options?: PublishOptions,
   ): Promise<SyncResult> {
-    return this.withHeaderRules(this.HEADER_RULES, async () => {
-      logger.info("Starting publish...");
+    try {
+      console.log("[Juejin] 开始同步流程...");
+      console.log("[Juejin] 文章信息:", {
+        title: article.title,
+        author: article.author,
+        summary: article.summary,
+        tags: article.tags,
+        category: article.category,
+        articleType: article.articleType,
+        cover: article.cover,
+        url: article.url,
+      });
 
-      // 1. 获取 CSRF token
+      // Step 1: 获取 CSRF Token
+      console.log("[Juejin] Step 1: 获取 CSRF Token");
       const csrfToken = await this.getCsrfToken();
 
-      // 2. 选择内容格式：优先使用markdown，其次是content，最后是html
-      let markdown = article.markdown || article.content || article.html || "";
+      // Step 2: 获取分类 ID
+      console.log("[Juejin] Step 2: 获取分类 ID");
+      const categoryId = await this.getValidCategoryId(article.category);
 
-      // 如果有摘要，添加到正文开头
+      // Step 3: 转换标签为 ID
+      console.log("[Juejin] Step 3: 转换标签为 ID");
+      const tagIds = await this.convertTagsToIds(article.tags || []);
+
+      // Step 4: 处理封面图
+      console.log("[Juejin] Step 4: 处理封面图");
+      let coverImage = article.cover || "";
+      if (coverImage && !coverImage.includes("juejin.cn")) {
+        console.log("[Juejin] 上传封面图:", coverImage);
+        const uploadRes = await this.uploadImageByUrl(coverImage);
+        coverImage = uploadRes.url;
+        console.log("[Juejin] 封面图上传完成:", coverImage);
+      }
+
+      // Step 5: 构建内容（遵循同步规则）
+      console.log("[Juejin] Step 5: 构建内容");
+      let markdown = article.markdown || article.content || "";
+
+      // 添加摘要
       if (article.summary) {
-        markdown = `> ${article.summary}\n\n${markdown}`;
+        markdown = `> **摘要：**${article.summary}\n\n---\n\n` + markdown;
+        console.log("[Juejin] 添加摘要完成");
       }
 
-      // 如果有作者信息，添加到正文开头
-      if (article.author) {
-        markdown = `**作者：${article.author}**\n\n${markdown}`;
+      // 添加版权声明
+      const isOriginal =
+        article.articleType === "original" || article.articleType === "原创";
+      if (isOriginal) {
+        markdown += `\n\n---\n**本文为原创文章，未经允许禁止转载。**`;
+        console.log("[Juejin] 添加原创版权声明");
+      } else if (article.url) {
+        markdown += `\n\n---\n**本文转载自：** [${article.url}](${article.url})`;
+        console.log("[Juejin] 添加转载声明");
       }
 
-      // 3. 处理图片（上传到掘金图床）
+      // Step 6: 处理图片转存
+      console.log("[Juejin] Step 6: 处理图片转存");
       markdown = await this.processImages(
         markdown,
         (src) => this.uploadImageByUrl(src),
         {
-          skipPatterns: [
-            "juejin.cn",
-            "p1-juejin",
-            "p3-juejin",
-            "p6-juejin",
-            "p9-juejin",
-            "byteimg.com",
-          ],
+          skipPatterns: ["juejin.cn", "byteimg.com"],
           onProgress: options?.onImageProgress,
         },
       );
+      console.log("[Juejin] 图片转存完成，内容长度:", markdown.length);
 
-      // 添加版权声明
-      markdown += "\n\n";
-      if (article.articleType === "original") {
-        markdown += "**本文为原创文章，未经允许禁止转载。**";
-      } else if (article.url) {
-        markdown +=
-          "**本文转载自：** [" + article.url + "](" + article.url + ")";
-      }
-
-      // 6. 创建草稿 (参数来自 DSL juejin.yaml + juejin.transform.ts prepareBody)
-      const createResponse = await this.runtime.fetch(
-        "https://api.juejin.cn/content_api/v1/article_draft/create",
-        {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-            "x-secsdk-csrf-token": csrfToken,
-          },
-          body: JSON.stringify({
-            brief_content: article.summary || "",
-            category_id: article.category || "0",
-            cover_image: article.cover || "",
-            edit_type: 10,
-            html_content: "deprecated",
-            link_url: "",
-            mark_content: markdown,
-            tag_ids: article.tags || [],
-            title: article.title,
-          }),
-        },
-      );
-
-      // 检查响应状态和内容
-      const responseText = await createResponse.text();
-      logger.debug(
-        "Create draft response:",
-        createResponse.status,
-        responseText.substring(0, 300),
-      );
-
-      if (!createResponse.ok) {
-        throw new Error(
-          `创建草稿失败: ${createResponse.status} - ${responseText}`,
-        );
-      }
-
-      let createData: {
-        data?: { id?: string };
-        err_msg?: string;
-        err_no?: number;
-      };
-      try {
-        createData = JSON.parse(responseText);
-      } catch {
-        throw new Error(
-          `创建草稿失败: 响应不是有效 JSON - ${responseText.substring(0, 100)}`,
-        );
-      }
-
-      // 检查业务错误
-      if (createData.err_no && createData.err_no !== 0) {
-        throw new Error(
-          createData.err_msg || `创建草稿失败: 错误码 ${createData.err_no}`,
-        );
-      }
-
-      if (!createData.data?.id) {
-        throw new Error(createData.err_msg || "创建草稿失败: 无效响应");
-      }
-
-      const draftId = createData.data.id;
-      logger.debug("Draft created:", draftId);
-
-      const draftUrl = `https://juejin.cn/editor/drafts/${draftId}`;
-
-      // 如果需要直接发布，调用发布接口
-      if (options?.draftOnly === false) {
-        logger.info("Publishing draft:", draftId);
-        try {
-          const publishResponse = await this.runtime.fetch(
-            "https://api.juejin.cn/content_api/v1/article/publish",
-            {
-              method: "POST",
-              credentials: "include",
-              headers: {
-                "Content-Type": "application/json",
-                "x-secsdk-csrf-token": csrfToken,
-              },
-              body: JSON.stringify({
-                draft_id: draftId,
-                sync_to_org: false,
-                column_ids: [],
-              }),
+      // 使用 Header 规则保护 API 请求
+      return this.withHeaderRules(this.HEADER_RULES, async () => {
+        // Step 7: 创建草稿
+        console.log("[Juejin] Step 7: 创建草稿");
+        console.log("[Juejin] UUID:", this.uuid);
+        const createResponse = await this.runtime.fetch(
+          `https://api.juejin.cn/content_api/v1/article_draft/create?aid=${IMAGEX_AID}&uuid=${this.uuid}`,
+          {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+              "x-secsdk-csrf-token": csrfToken,
+              "x-secsdk-csrf-version": "1.2.10",
             },
-          );
+            body: JSON.stringify({
+              title: article.title,
+            }),
+          },
+        );
 
-          const publishText = await publishResponse.text();
-          logger.debug(
-            "Publish response:",
-            publishResponse.status,
-            publishText.substring(0, 300),
-          );
+        console.log("[Juejin] 创建草稿响应状态:", createResponse.status);
+        const createData = await createResponse.json();
+        console.log("[Juejin] 创建草稿响应数据:", createData);
 
-          if (!publishResponse.ok) {
-            logger.warn("发布失败，文章已保存为草稿");
-            // 发布失败但草稿已创建，返回草稿链接
-            return this.createResult(true, {
-              postId: draftId,
-              postUrl: draftUrl,
-              draftOnly: true, // 标记为草稿
-            });
-          }
-
-          let publishData: {
-            data?: { article_id?: string };
-            err_msg?: string;
-            err_no?: number;
-          };
-          try {
-            publishData = JSON.parse(publishText);
-          } catch {
-            logger.warn("发布响应解析失败，文章已保存为草稿");
-            return this.createResult(true, {
-              postId: draftId,
-              postUrl: draftUrl,
-              draftOnly: true,
-            });
-          }
-
-          if (publishData.err_no && publishData.err_no !== 0) {
-            logger.warn("发布失败:", publishData.err_msg, "文章已保存为草稿");
-            return this.createResult(true, {
-              postId: draftId,
-              postUrl: draftUrl,
-              draftOnly: true,
-            });
-          }
-
-          const articleId = publishData.data?.article_id || draftId;
-          const publishedUrl = `https://juejin.cn/post/${articleId}`;
-          logger.info("Published successfully:", articleId);
-
-          return this.createResult(true, {
-            postId: articleId,
-            postUrl: publishedUrl,
-            draftOnly: false, // 已发布
-          });
-        } catch (publishError) {
-          logger.warn("发布过程出错:", publishError, "文章已保存为草稿");
-          // 发布失败但草稿已创建，返回草稿链接
-          return this.createResult(true, {
-            postId: draftId,
-            postUrl: draftUrl,
-            draftOnly: true,
-          });
+        if (!createData.data?.id) {
+          throw new Error(`创建草稿失败: ${createData.err_msg || "未知错误"}`);
         }
-      }
 
-      // 默认返回草稿
-      return this.createResult(true, {
-        postId: draftId,
-        postUrl: draftUrl,
-        draftOnly: true,
+        const draftId = createData.data.id;
+        console.log("[Juejin] 草稿创建成功，ID:", draftId);
+
+        // Step 8: 更新草稿内容
+        console.log("[Juejin] Step 8: 更新草稿内容");
+        const updateResponse = await this.runtime.fetch(
+          `https://api.juejin.cn/content_api/v1/article_draft/update?aid=${IMAGEX_AID}&uuid=${this.uuid}`,
+          {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+              "x-secsdk-csrf-token": csrfToken,
+              "x-secsdk-csrf-version": "1.2.10",
+            },
+            body: JSON.stringify({
+              id: draftId,
+              title: article.title,
+              brief_content: (article.summary || article.title).substring(
+                0,
+                100,
+              ),
+              mark_content: markdown,
+              html_content: "",
+              category_id: categoryId,
+              tag_ids: tagIds,
+              cover_image: coverImage,
+              link_url: article.url || "",
+              edit_type: 10,
+              origin_type: isOriginal ? 0 : 1,
+              status: 0,
+              pics: [],
+              theme_ids: [],
+              is_gfw: 0,
+              is_english: 0,
+              original_type: isOriginal ? 0 : 1,
+            }),
+          },
+        );
+
+        console.log("[Juejin] 更新草稿响应状态:", updateResponse.status);
+        const updateData = await updateResponse.json();
+        console.log("[Juejin] 更新草稿响应数据:", updateData);
+
+        if (updateData.err_no !== 0) {
+          throw new Error(`更新草稿失败: ${updateData.err_msg || "未知错误"}`);
+        }
+
+        console.log("[Juejin] 草稿更新成功");
+
+        // Step 9: 返回结果
+        console.log("[Juejin] Step 9: 返回同步结果");
+        return this.createResult(true, {
+          postId: draftId,
+          postUrl: `https://juejin.cn/editor/drafts/${draftId}`,
+          draftOnly: true,
+        });
       });
-    }).catch((error) =>
-      this.createResult(false, {
-        error: (error as Error).message,
-      }),
-    );
+    } catch (error) {
+      console.error("[Juejin] 同步失败:", error);
+      return this.createResult(false, { error: (error as Error).message });
+    }
   }
 
-  /**
-   * 通过 Blob 上传图片（覆盖基类方法）
-   * 需要设置动态请求头规则以支持 MCP 调用
-   */
-  async uploadImage(file: Blob, _filename?: string): Promise<string> {
+  // --- 图片上传相关逻辑 (ImageX 流程) ---
+
+  async uploadImage(file: Blob): Promise<string> {
     return this.withHeaderRules(this.HEADER_RULES, () =>
       this.uploadImageBinaryInternal(file),
     );
   }
 
-  /**
-   * 通过 URL 上传图片
-   * 支持远程 URL 和 data URI，都使用 ImageX 流程
-   */
   protected async uploadImageByUrl(src: string): Promise<ImageUploadResult> {
     try {
-      let blob: Blob;
-
-      if (src.startsWith("data:")) {
-        // data URI 直接转 blob
-        logger.debug("Detected data URI, converting to blob");
-        blob = await fetch(src).then((r) => r.blob());
-      } else {
-        // 远程 URL：先下载再上传
-        logger.debug("Downloading remote image:", src.substring(0, 80));
-        const response = await this.runtime.fetch(src, {
-          method: "GET",
-        });
-
-        if (!response.ok) {
-          logger.warn("Failed to download image:", response.status);
-          return { url: src };
-        }
-
-        blob = await response.blob();
-      }
-
-      // 使用 ImageX 流程上传
+      const response = await this.runtime.fetch(src, { method: "GET" });
+      if (!response.ok) return { url: src };
+      const blob = await response.blob();
       const url = await this.uploadImageBinaryInternal(blob);
-      logger.debug("Uploaded image:", src.substring(0, 50), "->", url);
       return { url };
     } catch (error) {
-      logger.warn("Failed to upload image by URL:", src, error);
-      return { url: src }; // 失败时返回原 URL
+      logger.warn("图片上传失败:", src, error);
+      return { url: src };
     }
   }
 
-  /**
-   * 获取 ImageX 上传凭证
-   */
   private async getImageXToken(): Promise<ImageXToken> {
-    // 检查缓存是否有效（提前 60 秒过期）
     if (this.cachedImageXToken && Date.now() < this.imageXTokenExpiry - 60000) {
       return this.cachedImageXToken;
     }
-
     const url = `https://api.juejin.cn/imagex/v2/gen_token?aid=${IMAGEX_AID}&uuid=${this.uuid}&client=web`;
     const response = await this.runtime.fetch(url, {
       method: "GET",
       credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-      },
     });
+    const data = (await response.json()) as ImageXTokenResponse;
+    if (data.err_no !== 0 || !data.data?.token)
+      throw new Error("获取 ImageX 凭证失败");
 
-    const responseText = await response.text();
-    logger.debug("gen_token response:", responseText.substring(0, 500));
-
-    let data: ImageXTokenResponse;
-    try {
-      data = JSON.parse(responseText);
-    } catch {
-      throw new Error(
-        `Invalid JSON response from gen_token: ${responseText.substring(0, 200)}`,
-      );
-    }
-
-    if (data.err_no && data.err_no !== 0) {
-      throw new Error(
-        data.err_msg || `Failed to get ImageX token: err_no=${data.err_no}`,
-      );
-    }
-
-    const tokenData = data.data?.token;
-    if (!tokenData || !tokenData.AccessKeyId || !tokenData.SecretAccessKey) {
-      throw new Error(
-        `Invalid ImageX token response: ${responseText.substring(0, 200)}`,
-      );
-    }
-
-    // 解析 ISO 日期为时间戳
+    const tokenData = data.data.token;
     const expiredTime = new Date(tokenData.ExpiredTime).getTime();
-
     this.cachedImageXToken = {
       AccessKeyId: tokenData.AccessKeyId,
       SecretAccessKey: tokenData.SecretAccessKey,
@@ -533,205 +524,69 @@ export class JuejinAdapter extends CodeAdapter {
       ExpiredTime: expiredTime,
     };
     this.imageXTokenExpiry = expiredTime;
-
-    logger.debug("Got ImageX token, expires at:", tokenData.ExpiredTime);
-
     return this.cachedImageXToken;
   }
 
-  /**
-   * 申请图片上传
-   */
-  private async applyImageUpload(
-    token: ImageXToken,
-  ): Promise<ImageXApplyUploadResponse["Result"]["UploadAddress"]> {
-    const url = `https://imagex.bytedanceapi.com/?Action=ApplyImageUpload&Version=2018-08-01&ServiceId=${IMAGEX_SERVICE_ID}`;
+  private async uploadImageBinaryInternal(file: Blob): Promise<string> {
+    const token = await this.getImageXToken();
 
-    // 生成 AWS4 签名
-    const signResult = await signAWS4({
+    // 1. Apply
+    const applyUrl = `https://imagex.bytedanceapi.com/?Action=ApplyImageUpload&Version=2018-08-01&ServiceId=${IMAGEX_SERVICE_ID}`;
+    const applySign = await signAWS4({
       method: "GET",
-      url,
+      url: applyUrl,
       accessKeyId: token.AccessKeyId,
       secretAccessKey: token.SecretAccessKey,
       securityToken: token.SessionToken,
       region: "cn-north-1",
       service: "imagex",
     });
-
-    const response = await this.runtime.fetch(url, {
-      method: "GET",
-      headers: {
-        ...signResult.headers,
-      },
+    const applyRes = await this.runtime.fetch(applyUrl, {
+      headers: applySign.headers,
     });
+    const applyData = (await applyRes.json()) as ImageXApplyUploadResponse;
+    const addr = applyData.Result.UploadAddress;
 
-    const data = (await response.json()) as ImageXApplyUploadResponse;
-
-    if (!data.Result?.UploadAddress) {
-      throw new Error("Failed to apply image upload");
-    }
-
-    return data.Result.UploadAddress;
-  }
-
-  /**
-   * 上传文件到 TOS
-   */
-  private async uploadToTOS(
-    uploadAddress: ImageXApplyUploadResponse["Result"]["UploadAddress"],
-    file: Blob,
-  ): Promise<void> {
-    const storeInfo = uploadAddress.StoreInfos[0];
-    const uploadHost = uploadAddress.UploadHosts[0];
-
-    if (!storeInfo || !uploadHost) {
-      throw new Error("Invalid upload address");
-    }
-
-    // 构建上传 URL
-    const uploadUrl = `https://${uploadHost}/${storeInfo.StoreUri}`;
-
-    // 计算 CRC32
+    // 2. Upload to TOS
+    const uploadUrl = `https://${addr.UploadHosts[0]}/${addr.StoreInfos[0].StoreUri}`;
     const arrayBuffer = await file.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
-    const crc32Value = crc32(uint8Array);
-
-    logger.debug(
-      "Uploading to TOS:",
-      uploadUrl,
-      "size:",
-      file.size,
-      "crc32:",
-      crc32Value,
-    );
-
-    // 上传文件
-    const response = await this.runtime.fetch(uploadUrl, {
+    const crc32Value = crc32(new Uint8Array(arrayBuffer));
+    await this.runtime.fetch(uploadUrl, {
       method: "PUT",
       headers: {
-        Authorization: storeInfo.Auth,
+        Authorization: addr.StoreInfos[0].Auth,
         "Content-Type": file.type || "application/octet-stream",
         "Content-CRC32": crc32Value,
       },
       body: file,
     });
 
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`TOS upload failed: ${response.status} ${text}`);
-    }
-
-    logger.debug("TOS upload success");
-  }
-
-  /**
-   * 提交图片上传
-   */
-  private async commitImageUpload(
-    token: ImageXToken,
-    sessionKey: string,
-  ): Promise<ImageXCommitUploadResponse["Result"]> {
-    const url = `https://imagex.bytedanceapi.com/?Action=CommitImageUpload&Version=2018-08-01&SessionKey=${encodeURIComponent(sessionKey)}&ServiceId=${IMAGEX_SERVICE_ID}`;
-
-    // 生成 AWS4 签名
-    const signResult = await signAWS4({
+    // 3. Commit
+    const commitUrl = `https://imagex.bytedanceapi.com/?Action=CommitImageUpload&Version=2018-08-01&SessionKey=${encodeURIComponent(addr.SessionKey)}&ServiceId=${IMAGEX_SERVICE_ID}`;
+    const commitSign = await signAWS4({
       method: "POST",
-      url,
+      url: commitUrl,
       accessKeyId: token.AccessKeyId,
       secretAccessKey: token.SecretAccessKey,
       securityToken: token.SessionToken,
       region: "cn-north-1",
       service: "imagex",
     });
-
-    const response = await this.runtime.fetch(url, {
+    await this.runtime.fetch(commitUrl, {
       method: "POST",
-      headers: {
-        ...signResult.headers,
-        "Content-Length": "0",
-      },
+      headers: { ...commitSign.headers, "Content-Length": "0" },
     });
 
-    const data = (await response.json()) as ImageXCommitUploadResponse;
-
-    if (!data.Result) {
-      throw new Error("Failed to commit image upload");
-    }
-
-    return data.Result;
-  }
-
-  /**
-   * 获取图片 URL
-   */
-  private async getImageUrl(uri: string): Promise<string> {
-    const url = `https://api.juejin.cn/imagex/v2/get_img_url?aid=${IMAGEX_AID}&uuid=${this.uuid}&uri=${encodeURIComponent(uri)}&img_type=private`;
-
-    const response = await this.runtime.fetch(url, {
+    // 4. Get Final URL
+    const getUrl = `https://api.juejin.cn/imagex/v2/get_img_url?aid=${IMAGEX_AID}&uuid=${this.uuid}&uri=${encodeURIComponent(addr.StoreInfos[0].StoreUri)}&img_type=private`;
+    const finalRes = await this.runtime.fetch(getUrl, {
       method: "GET",
       credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-      },
     });
-
-    const data = (await response.json()) as {
-      data?: { main_url?: string; backup_url?: string };
-      err_no?: number;
-      err_msg?: string;
-    };
-
-    if (data.err_no && data.err_no !== 0) {
-      throw new Error(data.err_msg || "Failed to get image URL");
-    }
-
-    const imageUrl = data.data?.main_url || data.data?.backup_url;
-    if (!imageUrl) {
-      throw new Error("Invalid image URL response");
-    }
-
-    return imageUrl;
+    const finalData = await finalRes.json();
+    return finalData.data?.main_url || finalData.data?.backup_url || "";
   }
 
-  /**
-   * 上传图片 (ImageX 方式) - 内部使用
-   */
-  private async uploadImageBinaryInternal(file: Blob): Promise<string> {
-    // 1. 获取上传凭证
-    const token = await this.getImageXToken();
-
-    // 2. 申请上传
-    const uploadAddress = await this.applyImageUpload(token);
-    logger.debug(
-      "Apply upload success, session:",
-      uploadAddress.SessionKey.substring(0, 50) + "...",
-    );
-
-    // 3. 上传到 TOS
-    await this.uploadToTOS(uploadAddress, file);
-
-    // 4. 提交上传
-    const commitResult = await this.commitImageUpload(
-      token,
-      uploadAddress.SessionKey,
-    );
-    logger.debug("Commit upload success:", commitResult.Results?.[0]?.Uri);
-
-    // 5. 获取图片 URL
-    const storeUri = uploadAddress.StoreInfos[0]?.StoreUri;
-    if (!storeUri) {
-      throw new Error("No store URI in upload address");
-    }
-
-    const imageUrl = await this.getImageUrl(storeUri);
-    logger.debug("Got image URL:", imageUrl);
-
-    return imageUrl;
-  }
-
-  /**
-   * 获取分类列表
-   */
   async getCategories() {
     const response = await this.runtime.fetch(
       "https://api.juejin.cn/tag_api/v1/query_category_briefs",
@@ -740,13 +595,8 @@ export class JuejinAdapter extends CodeAdapter {
         credentials: "include",
       },
     );
-
-    const data = (await response.json()) as {
-      data?: Array<{ category_id: string; category_name: string }>;
-    };
-
-    // 转换为标准 Category 格式
-    return (data.data || []).map((c) => ({
+    const data = await response.json();
+    return (data.data || []).map((c: any) => ({
       id: c.category_id,
       name: c.category_name,
     }));
