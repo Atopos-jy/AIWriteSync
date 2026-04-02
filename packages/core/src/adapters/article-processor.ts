@@ -53,16 +53,16 @@ export class ArticleProcessor {
     } else if (tags && tags.length > 0) {
       // 不支持标签的平台，在正文最前面拼接标签
       const tagLine = `标签：${tags.map((tag) => `#${tag}`).join(" ")}`;
-      finalContent = `${tagLine}\n\n${finalContent}`;
+      finalContent = `${tagLine}\n${finalContent}`;
     }
 
     // 2. 处理摘要
     if (capabilities.supportsSummary && summary) {
       apiSummary = summary;
     } else if (summary) {
-      // 不支持摘要的平台，在标签下方、正文上方拼接摘要
-      const summaryLine = `摘要：${summary}`;
-      finalContent = `${finalContent.split("\n\n")[0]}\n\n${summaryLine}\n\n${finalContent.split("\n\n").slice(1).join("\n\n")}`;
+      // 不支持摘要的平台，在标签下方、正文上方拼接摘要（使用引用样式）
+      const summaryLine = `> **摘要：** ${summary}`;
+      finalContent = `${finalContent.split("\n")[0]}\n${summaryLine}\n${finalContent.split("\n").slice(1).join("\n")}`;
     }
 
     // 3. 处理分类
@@ -118,16 +118,16 @@ export class ArticleProcessor {
     } else if (tags && tags.length > 0) {
       // 不支持标签的平台，在正文最前面拼接标签
       const tagLine = `<p>标签：${tags.map((tag) => `<span>#${tag}</span>`).join(" ")}</p>`;
-      finalHtml = `${tagLine}\n${finalHtml}`;
+      finalHtml = `${tagLine}${finalHtml}`;
     }
 
     // 2. 处理摘要
     if (capabilities.supportsSummary && summary) {
       apiSummary = summary;
     } else if (summary) {
-      // 不支持摘要的平台，在标签下方、正文上方拼接摘要
-      const summaryLine = `<p>摘要：${summary}</p>`;
-      finalHtml = `${finalHtml.split("\n")[0]}\n${summaryLine}\n${finalHtml.split("\n").slice(1).join("\n")}`;
+      // 不支持摘要的平台，在标签下方、正文上方拼接摘要（使用特定的引用样式）
+      const summaryLine = `<blockquote class="text-gray-500"><p><strong>摘要：</strong>${summary}</p></blockquote>`;
+      finalHtml = `${finalHtml.split("\n")[0]}\n${summaryLine}${finalHtml.split("\n").slice(1).join("\n")}`;
     }
 
     // 3. 处理分类
