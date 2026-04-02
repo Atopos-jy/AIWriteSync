@@ -9,6 +9,7 @@ import type {
   SyncResult,
   PlatformMeta,
 } from "../../types";
+import { ArticleProcessor } from "../article-processor";
 export class ImoocAdapter extends CodeAdapter {
   meta: PlatformMeta = {
     id: "imooc",
@@ -119,47 +120,40 @@ export class ImoocAdapter extends CodeAdapter {
    */
   async publish(article: Article, options?: any): Promise<SyncResult> {
     return this.withHeaderRules(this.HEADER_RULES, async () => {
-      // 1. 封面图处理
+      // 使用文章处理器处理内容
+      const processed = ArticleProcessor.processContent(article, {
+        supportsTags: true, // 慕课网支持标签
+        supportsSummary: true, // 慕课网支持摘要
+        supportsCategory: true, // 慕课网支持分类
+        supportsCover: true, // 慕课网支持封面
+        supportsAuthor: true, // 慕课网支持作者字段
+      });
+
+      // 封面图处理
       let coverUrl: string | null = null;
-      if (article.cover) {
+      if (processed.cover) {
         try {
-          const coverResult = await this.uploadImageByUrl(article.cover);
+          const coverResult = await this.uploadImageByUrl(processed.cover);
           coverUrl = coverResult.url;
         } catch (error) {
           console.error("封面上传失败:", error);
         }
       }
 
-      // 2. 内容处理
-      let content = article.markdown || article.html || "";
-
       // 处理文章内容中的图片
-      content = await this.processImages(
-        content,
+      let content = await this.processImages(
+        processed.content,
         (src) => this.uploadImageByUrl(src),
         {
           onProgress: options?.onImageProgress,
         },
       );
 
-      // 添加作者信息
-      if (article.author) {
-        content = "**作者：" + article.author + "**\n\n" + content;
-      }
-
-      // 添加版权声明
-      if (article.articleType === "original") {
-        content += "\n\n**本文为原创文章，未经允许禁止转载。**";
-      } else if (article.url) {
-        content +=
-          "\n\n**本文转载自：** [" + article.url + "](" + article.url + ")";
-      }
-
-      // 3. 构建请求数据
+      // 构建请求数据
       const postData: Record<string, string> = {
         editor: "0",
         draft_id: "0",
-        title: article.title,
+        title: processed.title,
         content: content,
       };
 
@@ -168,23 +162,23 @@ export class ImoocAdapter extends CodeAdapter {
         postData["cover"] = coverUrl;
       }
 
-      // 如果有标签，添加标签字段（假设慕课网支持标签）
-      if (article.tags && article.tags.length > 0) {
-        postData["tags"] = article.tags.join(",");
+      // 如果有标签，添加标签字段
+      if (processed.tags.length > 0) {
+        postData["tags"] = processed.tags.join(",");
       }
 
-      // 如果有摘要，添加摘要字段（假设慕课网支持摘要）
-      if (article.summary) {
-        postData["summary"] = article.summary;
+      // 如果有摘要，添加摘要字段
+      if (processed.summary) {
+        postData["summary"] = processed.summary;
       }
 
-      // 如果有分类，添加分类字段（假设慕课网支持分类）
-      if (article.category) {
-        postData["category"] = article.category;
+      // 如果有分类，添加分类字段
+      if (processed.category) {
+        postData["category"] = processed.category;
       }
 
-      // 如果有文章类型，添加文章类型字段（假设慕课网支持原创标记）
-      if (article.articleType === "original") {
+      // 如果有文章类型，添加文章类型字段
+      if (processed.articleType === "original") {
         postData["is_original"] = "1";
       }
 

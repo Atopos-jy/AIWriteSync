@@ -9,6 +9,7 @@ import type {
   SyncResult,
   PlatformMeta,
 } from "../../types";
+import { ArticleProcessor } from "../article-processor";
 export class SegmentfaultAdapter extends CodeAdapter {
   meta: PlatformMeta = {
     id: "segmentfault",
@@ -191,40 +192,27 @@ export class SegmentfaultAdapter extends CodeAdapter {
       // 获取 session token
       this.sessionToken = await this.getSessionToken();
 
-      // 优先使用 markdown，处理图片
-      let content = article.markdown || article.html || "";
-
-      // 摘要处理：思否不支持摘要字段，在文前添加摘要文本
-      if (article.summary) {
-        content = "**摘要：**" + article.summary + "\n\n" + content;
-      }
-
-      // 作者信息处理
-      if (article.author) {
-        content = "**作者：" + article.author + "**\n\n" + content;
-      }
+      // 使用文章处理器处理内容（SegmentFault支持标签，不支持摘要字段，需拼接到内容中）
+      const processed = ArticleProcessor.processContent(article, {
+        supportsTags: true, // SegmentFault支持标签
+        supportsSummary: false, // SegmentFault不支持摘要字段
+        supportsCategory: false, // SegmentFault不支持分类
+        supportsCover: false, // SegmentFault不支持封面
+        supportsAuthor: false, // SegmentFault使用账号作者
+      });
 
       // 处理图片
-      content = await this.processImages(
-        content,
+      let content = await this.processImages(
+        processed.content,
         (src) => this.uploadImageByUrl(src),
         {
           onProgress: options?.onImageProgress,
         },
       );
 
-      // 添加版权声明
-      content += "\n\n";
-      if (article.articleType === "original") {
-        content += "**本文为原创文章，未经允许禁止转载。**";
-      } else if (article.url) {
-        content +=
-          "**本文转载自：** [" + article.url + "](" + article.url + ")";
-      }
-
       const postData = {
-        title: article.title,
-        tags: article.tags || [],
+        title: processed.title,
+        tags: processed.tags,
         text: content,
         object_id: "",
         type: "article",

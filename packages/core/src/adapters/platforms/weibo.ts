@@ -11,6 +11,7 @@ import type {
 import type { PublishOptions } from "../types";
 import { createLogger } from "../../lib/logger";
 import { parseMarkdownImages } from "../../lib/markdown-images";
+import { ArticleProcessor } from "../article-processor";
 
 const logger = createLogger("Weibo");
 
@@ -134,34 +135,21 @@ export class WeiboAdapter extends CodeAdapter {
         throw new Error("请先登录微博");
       }
 
-      // Use pre-processed HTML content directly
-      let content = article.html || "";
+      // 使用文章处理器处理内容（微博使用 HTML 格式）
+      const processed = ArticleProcessor.processHtmlContent(article, {
+        supportsTags: false, // 微博不支持标签字段，需拼接到内容中
+        supportsSummary: true, // 微博支持摘要
+        supportsCategory: false, // 微博不支持分类字段
+        supportsCover: true, // 微博支持封面
+        supportsAuthor: true, // 微博支持作者字段
+      });
 
-      // 标签处理：微博不支持标签字段，在文前添加标签文本
-      if (article.tags && article.tags.length > 0) {
-        const tagsText = article.tags.map((tag) => "#" + tag).join(" ");
-        content =
-          "<p><strong>标签：</strong>" + tagsText + "</p>\n\n" + content;
-      }
-
+      let content = processed.content;
       content = content.replace(/>\s+</g, "><");
       content = await this.processWeiboImages(
         content,
         options?.onImageProgress,
       );
-
-      // 添加版权声明
-      content += "\n\n";
-      if (article.articleType === "original") {
-        content += "<p><strong>本文为原创文章，未经允许禁止转载。</strong></p>";
-      } else if (article.url) {
-        content +=
-          '<p><strong>本文转载自：</strong><a href="' +
-          article.url +
-          '" target="_blank">' +
-          article.url +
-          "</a></p>";
-      }
 
       const createReqId = this.generateReqId();
       const createResponse = await this.runtime.fetch(
@@ -191,9 +179,9 @@ export class WeiboAdapter extends CodeAdapter {
       logger.debug("Created draft:", postId);
 
       let coverUrl = "";
-      if (article.cover) {
+      if (processed.cover) {
         try {
-          const coverResult = await this.uploadImageByUrl(article.cover);
+          const coverResult = await this.uploadImageByUrl(processed.cover);
           coverUrl = coverResult.url;
         } catch (e) {
           logger.warn("Failed to upload cover:", e);
@@ -213,7 +201,7 @@ export class WeiboAdapter extends CodeAdapter {
           },
           body: new URLSearchParams({
             id: postId,
-            title: article.title,
+            title: processed.title,
             subtitle: "",
             type: "",
             status: "0",
@@ -224,7 +212,7 @@ export class WeiboAdapter extends CodeAdapter {
             free_content: "",
             content: content,
             cover: coverUrl,
-            summary: article.summary || "",
+            summary: processed.summary || "",
             writer: article.author || "",
             extra: "null",
             is_word: "0",

@@ -9,8 +9,9 @@ import type {
   PlatformMeta,
 } from "../../types";
 import type { PublishOptions } from "../types";
-import { signAWS4, crc32 } from "../../lib";
 import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
+import { signAWS4, crc32 } from "../../lib";
 
 const logger = createLogger("Juejin");
 
@@ -130,18 +131,13 @@ export class JuejinAdapter extends CodeAdapter {
    */
   private async getCsrfToken(): Promise<string> {
     if (this.cachedCsrfToken) {
-      console.log("[Juejin] 使用缓存的 CSRF Token");
       return this.cachedCsrfToken;
     }
 
-    console.log("[Juejin] 获取 CSRF Token...");
-
     // 方法1: 直接从浏览器Cookie读取（仿照简书实现）
     try {
-      console.log("[Juejin] 方法1: 从浏览器Cookie读取Token");
       if (this.runtime.cookies && this.runtime.cookies.get) {
         const cookies = await this.runtime.cookies.get(".juejin.cn");
-        console.log("[Juejin] 获取到的Cookie数量:", cookies.length);
 
         // 尝试多种可能的Cookie名称
         const possibleNames = [
@@ -200,7 +196,6 @@ export class JuejinAdapter extends CodeAdapter {
       const wareToken =
         response.headers.get("x-ware-csrf-token") ||
         response.headers.get("X-Ware-Csrf-Token");
-      console.log("[Juejin] 从响应头获取的X-Ware-Csrf-Token:", wareToken);
 
       if (wareToken) {
         // 掘金的Token格式通常是 "0,token_value"
@@ -215,7 +210,6 @@ export class JuejinAdapter extends CodeAdapter {
 
     // 方法3: 访问掘金编辑器页面，提取页面中的Token（备用方法）
     try {
-      console.log("[Juejin] 方法3: 访问掘金编辑器页面获取Token");
       const response = await this.runtime.fetch(
         "https://juejin.cn/editor/drafts/new",
         {
@@ -321,62 +315,37 @@ export class JuejinAdapter extends CodeAdapter {
   ): Promise<SyncResult> {
     try {
       console.log("[Juejin] 开始同步流程...");
-      console.log("[Juejin] 文章信息:", {
-        title: article.title,
-        author: article.author,
-        summary: article.summary,
-        tags: article.tags,
-        category: article.category,
-        articleType: article.articleType,
-        cover: article.cover,
-        url: article.url,
-      });
 
       // Step 1: 获取 CSRF Token
       console.log("[Juejin] Step 1: 获取 CSRF Token");
       const csrfToken = await this.getCsrfToken();
 
-      // Step 2: 获取分类 ID
-      console.log("[Juejin] Step 2: 获取分类 ID");
-      const categoryId = await this.getValidCategoryId(article.category);
+      // Step 2: 使用文章处理器处理内容
 
-      // Step 3: 转换标签为 ID
-      console.log("[Juejin] Step 3: 转换标签为 ID");
-      const tagIds = await this.convertTagsToIds(article.tags || []);
+      const processed = ArticleProcessor.processContent(article, {
+        supportsTags: true, // 掘金支持标签
+        supportsSummary: true, // 掘金支持摘要
+        supportsCategory: true, // 掘金支持分类
+        supportsCover: true, // 掘金支持封面
+        supportsAuthor: false, // 掘金使用账号作者
+      });
 
-      // Step 4: 处理封面图
-      console.log("[Juejin] Step 4: 处理封面图");
-      let coverImage = article.cover || "";
+      // Step 3: 获取分类 ID（使用处理后的分类）
+      const categoryId = await this.getValidCategoryId(processed.category);
+
+      // Step 4: 转换标签为 ID（使用处理后的标签）
+      const tagIds = await this.convertTagsToIds(processed.tags);
+
+      // Step 5: 处理封面图（使用处理后的封面）
+      let coverImage = processed.cover || "";
       if (coverImage && !coverImage.includes("juejin.cn")) {
-        console.log("[Juejin] 上传封面图:", coverImage);
         const uploadRes = await this.uploadImageByUrl(coverImage);
         coverImage = uploadRes.url;
-        console.log("[Juejin] 封面图上传完成:", coverImage);
       }
 
-      // Step 5: 构建内容（遵循同步规则）
-      console.log("[Juejin] Step 5: 构建内容");
-      let markdown = article.markdown || article.content || "";
-
-      // 添加摘要
-      if (article.summary) {
-        markdown = `> **摘要：**${article.summary}\n\n---\n\n` + markdown;
-        console.log("[Juejin] 添加摘要完成");
-      }
-
-      // 添加版权声明
-      const isOriginal =
-        article.articleType === "original" || article.articleType === "原创";
-      if (isOriginal) {
-        markdown += `\n\n---\n**本文为原创文章，未经允许禁止转载。**`;
-        console.log("[Juejin] 添加原创版权声明");
-      } else if (article.url) {
-        markdown += `\n\n---\n**本文转载自：** [${article.url}](${article.url})`;
-        console.log("[Juejin] 添加转载声明");
-      }
+      let markdown = processed.content;
 
       // Step 6: 处理图片转存
-      console.log("[Juejin] Step 6: 处理图片转存");
       markdown = await this.processImages(
         markdown,
         (src) => this.uploadImageByUrl(src),
@@ -385,13 +354,10 @@ export class JuejinAdapter extends CodeAdapter {
           onProgress: options?.onImageProgress,
         },
       );
-      console.log("[Juejin] 图片转存完成，内容长度:", markdown.length);
 
       // 使用 Header 规则保护 API 请求
       return this.withHeaderRules(this.HEADER_RULES, async () => {
         // Step 7: 创建草稿
-        console.log("[Juejin] Step 7: 创建草稿");
-        console.log("[Juejin] UUID:", this.uuid);
         const createResponse = await this.runtime.fetch(
           `https://api.juejin.cn/content_api/v1/article_draft/create?aid=${IMAGEX_AID}&uuid=${this.uuid}`,
           {
@@ -403,24 +369,25 @@ export class JuejinAdapter extends CodeAdapter {
               "x-secsdk-csrf-version": "1.2.10",
             },
             body: JSON.stringify({
-              title: article.title,
+              title: processed.title,
             }),
           },
         );
 
-        console.log("[Juejin] 创建草稿响应状态:", createResponse.status);
         const createData = await createResponse.json();
-        console.log("[Juejin] 创建草稿响应数据:", createData);
 
         if (!createData.data?.id) {
           throw new Error(`创建草稿失败: ${createData.err_msg || "未知错误"}`);
         }
 
         const draftId = createData.data.id;
-        console.log("[Juejin] 草稿创建成功，ID:", draftId);
+
+        // 判断文章类型
+        const isOriginal =
+          processed.articleType === "original" ||
+          processed.articleType === "原创";
 
         // Step 8: 更新草稿内容
-        console.log("[Juejin] Step 8: 更新草稿内容");
         const updateResponse = await this.runtime.fetch(
           `https://api.juejin.cn/content_api/v1/article_draft/update?aid=${IMAGEX_AID}&uuid=${this.uuid}`,
           {
@@ -433,8 +400,8 @@ export class JuejinAdapter extends CodeAdapter {
             },
             body: JSON.stringify({
               id: draftId,
-              title: article.title,
-              brief_content: (article.summary || article.title).substring(
+              title: processed.title,
+              brief_content: (processed.summary || processed.title).substring(
                 0,
                 100,
               ),
@@ -464,10 +431,7 @@ export class JuejinAdapter extends CodeAdapter {
           throw new Error(`更新草稿失败: ${updateData.err_msg || "未知错误"}`);
         }
 
-        console.log("[Juejin] 草稿更新成功");
-
         // Step 9: 返回结果
-        console.log("[Juejin] Step 9: 返回同步结果");
         return this.createResult(true, {
           postId: draftId,
           postUrl: `https://juejin.cn/editor/drafts/${draftId}`,

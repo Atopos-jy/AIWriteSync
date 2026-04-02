@@ -10,6 +10,7 @@ import type {
 } from "../../types";
 import type { PublishOptions } from "../types";
 import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
 
 const logger = createLogger("Yuque");
 
@@ -127,6 +128,15 @@ export class YuqueAdapter extends CodeAdapter {
         }
       }
 
+      // 使用文章处理器处理内容（语雀使用 Markdown 格式）
+      const processed = ArticleProcessor.processContent(article, {
+        supportsTags: true, // 语雀支持标签字段
+        supportsSummary: true, // 语雀支持摘要字段
+        supportsCategory: true, // 语雀通过 book_id 支持分类
+        supportsCover: false, // 语雀不支持封面
+        supportsAuthor: false, // 语雀不支持作者字段
+      });
+
       const createResponse = await this.runtime.fetch(
         "https://www.yuque.com/api/docs",
         {
@@ -137,13 +147,13 @@ export class YuqueAdapter extends CodeAdapter {
             "x-csrf-token": this.csrfToken,
           },
           body: JSON.stringify({
-            title: article.title,
+            title: processed.title,
             type: "Doc",
             format: "lake",
             book_id: this.bookId,
             status: 0,
-            tags: article.tags || [],
-            description: article.summary || "",
+            tags: processed.tags || [],
+            description: processed.summary || "",
           }),
         },
       );
@@ -162,27 +172,15 @@ export class YuqueAdapter extends CodeAdapter {
       const postId = createRes.data.id;
       this.currentPostId = postId;
 
-      // Use pre-processed markdown content directly
-      let markdown = article.markdown || "";
-
       // Process images in markdown
-      markdown = await this.processImages(
-        markdown,
+      let markdown = await this.processImages(
+        processed.content,
         (src) => this.uploadImageByUrl(src),
         {
           skipPatterns: ["yuque.com", "cdn.nlark.com"],
           onProgress: options?.onImageProgress,
         },
       );
-
-      // 添加版权声明
-      markdown += "\n\n";
-      if (article.articleType === "original") {
-        markdown += "**本文为原创文章，未经允许禁止转载。**";
-      } else if (article.url) {
-        markdown +=
-          "**本文转载自：** [" + article.url + "](" + article.url + ")";
-      }
 
       const convertResponse = await this.runtime.fetch(
         "https://www.yuque.com/api/docs/convert",

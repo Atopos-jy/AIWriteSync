@@ -10,6 +10,7 @@ import type {
 } from "../../types";
 import type { PublishOptions } from "../types";
 import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
 
 const logger = createLogger("Sohu");
 
@@ -140,18 +141,18 @@ export class SohuAdapter extends CodeAdapter {
         }
       }
 
-      // Use pre-processed HTML content directly
-      let content = article.html || "";
+      // 使用文章处理器处理内容（搜狐号使用 HTML 格式）
+      const processed = ArticleProcessor.processHtmlContent(article, {
+        supportsTags: true, // 搜狐号支持标签
+        supportsSummary: true, // 搜狐号支持摘要
+        supportsCategory: true, // 搜狐号支持分类
+        supportsCover: true, // 搜狐号支持封面
+        supportsAuthor: false, // 搜狐号不支持作者字段
+      });
 
-      // 作者信息处理：搜狐号不支持作者字段，在文前添加作者信息
-      if (article.author) {
-        content =
-          "<p><strong>作者：" + article.author + "</strong></p>\n\n" + content;
-      }
-
-      // Process images
-      content = await this.processImages(
-        content,
+      // 处理图片
+      let content = await this.processImages(
+        processed.content,
         (src) => this.uploadImageByUrl(src),
         {
           skipPatterns: ["sohu.com"],
@@ -159,48 +160,37 @@ export class SohuAdapter extends CodeAdapter {
         },
       );
 
-      // 添加版权声明
-      content += "\n\n";
-      if (article.articleType === "original") {
-        content += "<p><strong>本文为原创文章，未经允许禁止转载。</strong></p>";
-      } else if (article.url) {
-        content +=
-          '<p><strong>本文转载自：</strong><a href="' +
-          article.url +
-          '" target="_blank">' +
-          article.url +
-          "</a></p>";
-      }
-
       // 处理封面图
       let coverUrl = "";
-      if (article.cover) {
+      if (processed.cover) {
         try {
-          const coverUploadResult = await this.uploadImageByUrl(article.cover);
+          const coverUploadResult = await this.uploadImageByUrl(
+            processed.cover,
+          );
           coverUrl = coverUploadResult.url;
         } catch (error) {
           logger.error("Failed to upload cover image:", error);
         }
       }
 
-      // 4. 保存草稿 (v2 API - JSON 格式)
+      // 保存草稿 (v2 API - JSON 格式)
       const postData = {
-        title: article.title,
-        brief: article.summary || "",
+        title: processed.title,
+        brief: processed.summary || "",
         content: content,
-        channelId: article.category ? Number(article.category) : 24,
+        channelId: processed.category ? Number(processed.category) : 24,
         categoryId: -1,
         id: 0,
         userColumnId: 0,
         columnNewsIds: [],
         businessCode: 0,
-        declareOriginal: article.articleType === "original",
+        declareOriginal: processed.articleType === "original",
         cover: coverUrl,
         topicIds: [],
         isAd: 0,
         userLabels: "[]",
-        reprint: article.articleType === "转载",
-        customTags: article.tags?.join(",") || "",
+        reprint: processed.articleType === "转载",
+        customTags: processed.tags.join(",") || "",
         infoResource: 0,
         sourceUrl: article.url || "",
         visibleToLoginedUsers: 0,

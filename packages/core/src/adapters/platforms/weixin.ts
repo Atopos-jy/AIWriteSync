@@ -11,6 +11,7 @@ import type {
 import type { PublishOptions } from "../types";
 import { createLogger } from "../../lib/logger";
 import juice from "juice";
+import { ArticleProcessor } from "../article-processor";
 
 const logger = createLogger("Weixin");
 
@@ -151,15 +152,16 @@ export class WeixinAdapter extends CodeAdapter {
         }
       }
 
-      // Use pre-processed HTML content directly
-      let content = article.html || "";
+      // 使用文章处理器处理内容（微信公众号使用 HTML 格式）
+      const processed = ArticleProcessor.processHtmlContent(article, {
+        supportsTags: false, // 微信公众号不支持标签字段，需拼接到内容中
+        supportsSummary: true, // 微信公众号支持摘要
+        supportsCategory: false, // 微信公众号不支持分类字段
+        supportsCover: true, // 微信公众号支持封面
+        supportsAuthor: true, // 微信公众号支持作者字段
+      });
 
-      // 标签处理：微信公众号不支持标签字段，在文前添加标签文本
-      if (article.tags && article.tags.length > 0) {
-        const tagsText = article.tags.map((tag) => "#" + tag).join(" ");
-        content =
-          "<p><strong>标签：</strong>" + tagsText + "</p>\n\n" + content;
-      }
+      let content = processed.content;
 
       content = this.processLatex(content);
 
@@ -174,14 +176,6 @@ export class WeixinAdapter extends CodeAdapter {
           onProgress: options?.onImageProgress,
         },
       );
-
-      // 添加版权声明
-      content += "\n\n";
-      if (article.articleType === "original") {
-        content += "<p><strong>本文为原创文章，未经允许禁止转载。</strong></p>";
-      } else if (article.url) {
-        content += "<p><strong>本文转载自：</strong>" + article.url + "</p>";
-      }
 
       content = this.processContent(content);
 
@@ -200,12 +194,12 @@ export class WeixinAdapter extends CodeAdapter {
         can_reward0: "0",
         related_video0: "",
         is_video_recommend0: "-1",
-        title0: article.title,
+        title0: processed.title,
         author0: article.author || "",
         writerid0: "0",
         fileid0: "",
-        digest0: article.summary || "",
-        auto_gen_digest0: article.summary ? "0" : "1",
+        digest0: processed.summary || "",
+        auto_gen_digest0: processed.summary ? "0" : "1",
         content0: content,
         sourceurl0: article.url || "",
         need_open_comment0: "1",
@@ -226,7 +220,7 @@ export class WeixinAdapter extends CodeAdapter {
         vid_type0: "",
         show_cover_pic0: "0",
         shortvideofileid0: "",
-        copyright_type0: article.articleType === "original" ? "1" : "0",
+        copyright_type0: processed.articleType === "original" ? "1" : "0",
         releasefirst0: "",
         platform0: "",
         reprint_permit_type0: "",

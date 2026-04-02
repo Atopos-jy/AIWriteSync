@@ -9,6 +9,7 @@ import type {
   SyncResult,
   PlatformMeta,
 } from "../../types";
+import { ArticleProcessor } from "../article-processor";
 export class OschinaAdapter extends CodeAdapter {
   meta: PlatformMeta = {
     id: "oschina",
@@ -138,45 +139,26 @@ export class OschinaAdapter extends CodeAdapter {
         }
       }
 
-      const rawMarkdown = article.markdown || "";
-      const rawHtml = article.html || "";
-      const useMarkdown = rawMarkdown.trim().length > 0;
+      // 使用文章处理器处理内容（开源中国不支持标签和摘要字段，需拼接到内容中）
+      const processed = ArticleProcessor.processContent(article, {
+        supportsTags: false, // 开源中国不支持标签字段
+        supportsSummary: false, // 开源中国不支持摘要字段
+        supportsCategory: true, // 开源中国支持分类
+        supportsCover: false, // 开源中国不支持封面
+        supportsAuthor: false, // 开源中国使用账号作者
+      });
 
-      let content = useMarkdown ? rawMarkdown : rawHtml;
-
-      // 标签处理：开源中国不支持标签字段，在文前添加标签文本
-      if (article.tags && article.tags.length > 0) {
-        const tagsText = article.tags.map((tag) => "#" + tag).join(" ");
-        content = "**标签：**" + tagsText + "\n\n" + content;
-      }
-
-      // 摘要处理：开源中国不支持摘要字段，在标签下方添加摘要文本
-      if (article.summary) {
-        content = "**摘要：**" + article.summary + "\n\n" + content;
-      }
-
-      // 作者信息处理
-      if (article.author) {
-        content = "**作者：" + article.author + "**\n\n" + content;
-      }
+      const rawMarkdown = processed.content;
+      const useMarkdown = true;
 
       // 处理图片
-      content = await this.processImages(
-        content,
+      let content = await this.processImages(
+        rawMarkdown,
         (src) => this.uploadImageByUrl(src),
         {
           onProgress: options?.onImageProgress,
         },
       );
-
-      // 添加版权声明
-      content += "\n\n";
-      if (article.articleType === "original") {
-        content += "**本文为原创文章，未经允许禁止转载。**";
-      } else if (article.url) {
-        content +=
-          "**本文转载自：** [" + article.url + "](" + article.url + ")";
-      }
 
       const response = await this.runtime.fetch(
         "https://apiv1.oschina.net/oschinapi/api/draft/save_draft",
@@ -187,12 +169,12 @@ export class OschinaAdapter extends CodeAdapter {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            title: article.title,
+            title: processed.title,
             user: Number(this.userId),
             content,
             contentType: useMarkdown ? 1 : 2, // 1=markdown, 2=html
-            catalog: article.category ? Number(article.category) : 0,
-            originUrl: article.url || "",
+            catalog: processed.category ? Number(processed.category) : 0,
+            originUrl: processed.url || "",
             privacy: true,
             disableComment: false,
           }),

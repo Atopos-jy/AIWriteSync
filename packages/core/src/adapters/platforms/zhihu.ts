@@ -10,6 +10,7 @@ import type {
 } from "../../types";
 import type { PublishOptions } from "../types";
 import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
 import md5Lib from "js-md5";
 
 const logger = createLogger("Zhihu");
@@ -101,6 +102,15 @@ export class ZhihuAdapter extends CodeAdapter {
     return this.withHeaderRules(this.HEADER_RULES, async () => {
       logger.info("Starting publish...");
 
+      // 使用文章处理器处理内容（知乎使用 HTML 格式）
+      const processed = ArticleProcessor.processHtmlContent(article, {
+        supportsTags: false, // 知乎不支持标签
+        supportsSummary: false,
+        supportsCategory: false, // 知乎不支持分类
+        supportsCover: true, // 知乎支持封面
+        supportsAuthor: false, // 知乎使用账号作者
+      });
+
       // 1. 创建草稿容器
       const createResponse = await this.runtime.fetch(
         "https://zhuanlan.zhihu.com/api/articles/drafts",
@@ -112,7 +122,7 @@ export class ZhihuAdapter extends CodeAdapter {
             "x-requested-with": "fetch",
           },
           body: JSON.stringify({
-            title: article.title,
+            title: processed.title,
             content: "",
             delta_time: 0,
           }),
@@ -128,8 +138,7 @@ export class ZhihuAdapter extends CodeAdapter {
       const draftId = createData.id;
       logger.debug("Draft created:", draftId);
 
-      // 2. 处理正文图片
-      let content = article.html || article.markdown || article.content || "";
+      let content = processed.content;
       content = await this.processImages(
         content,
         (src) => this.uploadImageByUrl(src),
@@ -141,37 +150,12 @@ export class ZhihuAdapter extends CodeAdapter {
 
       content = this.transformContent(content);
 
-      // 添加版权声明
-      content += "\n\n";
-      if (article.articleType === "original") {
-        content += "<p><strong>本文为原创文章，未经允许禁止转载。</strong></p>";
-      } else if (article.url) {
-        content += "<p><strong>本文转载自：</strong>" + article.url + "</p>";
-      }
-
-      // 3. 注入元信息（标签/摘要/作者）
-      // 标签处理：知乎不支持标签字段，在文前添加标签文本
-      if (article.tags && article.tags.length > 0) {
-        const tagsText = article.tags.map((tag) => "#" + tag).join(" ");
-        content = `<p><strong>标签：</strong>${tagsText}</p>\n\n${content}`;
-      }
-
-      // 摘要处理：使用blockquote标签显示摘要
-      if (article.summary) {
-        content = `<blockquote>${article.summary}</blockquote>\n\n${content}`;
-      }
-
-      // 作者信息处理
-      if (article.author) {
-        content = `<p><strong>作者：${article.author}</strong></p>\n\n${content}`;
-      }
-
       // 4. 处理封面图 (核心修复部分)
       let coverImageUrl: string | undefined;
-      if (article.cover) {
+      if (processed.cover) {
         try {
-          logger.info(`[Zhihu] 正在处理封面: ${article.cover}`);
-          const coverResp = await this.runtime.fetch(article.cover);
+          logger.info(`[Zhihu] 正在处理封面: ${processed.cover}`);
+          const coverResp = await this.runtime.fetch(processed.cover);
           if (coverResp.ok) {
             const coverBlob = await coverResp.blob();
             // 复用内部二进制上传逻辑，确保拿到 zhimg 域名的 URL
@@ -185,7 +169,7 @@ export class ZhihuAdapter extends CodeAdapter {
 
       // 5. 更新草稿内容与封面
       const updateBody: any = {
-        title: article.title,
+        title: processed.title,
         content: content,
         delta_time: 1,
       };

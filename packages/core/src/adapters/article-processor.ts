@@ -31,14 +31,16 @@ export class ArticleProcessor {
     article: Article,
     capabilities: PlatformCapabilities,
   ): {
-    /** 处理后的正文内容 */
+    title: string;
     content: string;
-    /** 用于API的标签（如果平台支持） */
     tags: string[];
-    /** 用于API的摘要（如果平台支持） */
     summary: string;
-    /** 用于API的分类（如果平台支持） */
     category: string;
+    author: string | undefined;
+    cover: string | undefined;
+    publishDate: string | undefined;
+    url: string | undefined;
+    articleType: string | undefined;
   } {
     const { content, summary, tags, category, articleType, url } = article;
 
@@ -79,10 +81,16 @@ export class ArticleProcessor {
     }
 
     return {
+      title: article.title,
       content: finalContent,
       tags: apiTags,
       summary: apiSummary,
       category: apiCategory,
+      author: article.author,
+      cover: article.cover,
+      publishDate: article.publishDate,
+      url: article.url,
+      articleType: article.articleType,
     };
   }
 
@@ -96,14 +104,16 @@ export class ArticleProcessor {
     article: Article,
     capabilities: PlatformCapabilities,
   ): {
-    /** 处理后的HTML内容 */
+    title: string;
     content: string;
-    /** 用于API的标签（如果平台支持） */
     tags: string[];
-    /** 用于API的摘要（如果平台支持） */
     summary: string;
-    /** 用于API的分类（如果平台支持） */
     category: string;
+    author: string | undefined;
+    cover: string | undefined;
+    publishDate: string | undefined;
+    url: string | undefined;
+    articleType: string | undefined;
   } {
     const { html, summary, tags, category, articleType, url } = article;
 
@@ -148,10 +158,16 @@ export class ArticleProcessor {
     }
 
     return {
+      title: article.title,
       content: finalHtml,
       tags: apiTags,
       summary: apiSummary,
       category: apiCategory,
+      author: article.author,
+      cover: article.cover,
+      publishDate: article.publishDate,
+      url: article.url,
+      articleType: article.articleType,
     };
   }
 }

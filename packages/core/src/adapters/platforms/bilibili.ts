@@ -9,6 +9,7 @@ import type {
   PlatformMeta,
 } from "../../types";
 import type { PublishOptions } from "../types";
+import { ArticleProcessor } from "../article-processor";
 
 export class BilibiliAdapter extends CodeAdapter {
   readonly meta: PlatformMeta = {
@@ -70,30 +71,17 @@ export class BilibiliAdapter extends CodeAdapter {
       if (!this.userInfo) await this.checkAuth();
       if (!this.csrf) throw new Error("获取 CSRF token 失败");
 
-      // --- 核心逻辑：内容拼接引擎 ---
-      let prefixHtml = "";
-      let suffixHtml = "";
-
-      // 1. 标签处理 (B站支持标签字段，但为了稳妥，我们在文前也加上)
-      if (article.tags && article.tags.length > 0) {
-        const tagText = article.tags.map((t) => `#${t}`).join(" ");
-        prefixHtml += `<p><strong>标签：</strong>${tagText}</p>`;
-      }
-
-      // 2. 摘要处理 (B站专栏没有独立摘要展示位，按要求加在文前)
-      if (article.summary) {
-        prefixHtml += `<p><strong>摘要：</strong>${article.summary}</p><hr />`;
-      }
-
-      // 3. 版权声明处理 (文末)
-      if (article.articleType === "原创") {
-        suffixHtml += `<hr /><p><em>本文由作者 ${article.author || this.userInfo.uname} 原创发布。</em></p>`;
-      } else if (article.articleType === "转载" && article.url) {
-        suffixHtml += `<hr /><p><em>转载自：<a href="${article.url}">${article.url}</a></em></p>`;
-      }
+      // 使用文章处理器处理内容
+      const processed = ArticleProcessor.processHtmlContent(article, {
+        supportsTags: true, // B站支持标签字段
+        supportsSummary: false, // B站没有独立摘要展示位
+        supportsCategory: false, // B站没有分类字段
+        supportsCover: true, // B站支持封面
+        supportsAuthor: false, // B站使用用户账号作为作者
+      });
 
       // 拼接顺序：标签 -> 摘要 -> 正文 -> 版权
-      let finalHtml = prefixHtml + (article.html || "") + suffixHtml;
+      let finalHtml = processed.content;
 
       // 4. 正文图片上传处理
       finalHtml = await this.processImages(
@@ -107,9 +95,9 @@ export class BilibiliAdapter extends CodeAdapter {
 
       // 5. 封面上传
       let coverUrl: string = "";
-      if (article.cover) {
+      if (processed.cover) {
         try {
-          const uploadRes = await this.uploadImageByUrl(article.cover);
+          const uploadRes = await this.uploadImageByUrl(processed.cover);
           coverUrl = uploadRes.url;
         } catch (error) {
           console.error(`[Bilibili] 封面上传失败:`, error);
@@ -123,15 +111,15 @@ export class BilibiliAdapter extends CodeAdapter {
         credentials: "include",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
-          title: article.title,
+          title: processed.title,
           content: finalHtml,
           csrf: this.csrf,
           tid: "4", // 默认分区
           save: "0",
           pgc_id: "0",
           banner_url: coverUrl,
-          tags: (article.tags || []).join(","), // 同时同步到B站标签系统
-          original: article.articleType === "原创" ? "1" : "0",
+          tags: processed.tags.join(","), // 使用处理后的标签
+          original: processed.articleType === "原创" ? "1" : "0",
         }).toString(),
       });
 

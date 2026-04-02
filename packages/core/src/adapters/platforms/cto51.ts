@@ -1,11 +1,6 @@
 /**
  * 51CTO 适配器
  * https://blog.51cto.com
- *
- * 新版图片上传流程:
- * 1. getUploadSign - 获取上传签名
- * 2. getUploadConfig - 获取腾讯云 COS 上传凭证
- * 3. 上传到腾讯云 COS
  */
 import { CodeAdapter, ImageUploadResult } from "../code-adapter";
 import type {
@@ -16,6 +11,7 @@ import type {
 } from "../../types";
 import type { PublishOptions } from "../types";
 import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
 
 const logger = createLogger("51CTO");
 
@@ -264,16 +260,17 @@ export class Cto51Adapter extends CodeAdapter {
         }
       }
 
-      // ==============================================
-      // 🔥 全字段同步处理
-      // ==============================================
+      // 使用文章处理器处理内容
+      const processed = ArticleProcessor.processContent(article, {
+        supportsTags: true, // 51CTO支持标签
+        supportsSummary: true, // 51CTO支持摘要
+        supportsCategory: true, // 51CTO支持分类
+        supportsCover: true, // 51CTO支持封面
+        supportsAuthor: false, // 51CTO使用账号作者
+      });
 
-      // 选择内容格式：优先使用markdown，其次是content，最后是html
-      let content = article.markdown || article.content || article.html || "";
-
-      // 处理图片
-      content = await this.processImages(
-        content,
+      let finalContent = await this.processImages(
+        processed.content,
         (src) => this.uploadImageByUrl(src),
         {
           skipPatterns: ["51cto.com"],
@@ -281,24 +278,14 @@ export class Cto51Adapter extends CodeAdapter {
         },
       );
 
-      // 51CTO支持标签和摘要，直接使用API字段
-      // 按照要求在文末添加版权声明
-      let finalContent = content;
-
-      // 版权声明处理
-      const copyright = "\n\n";
-      if (article.articleType === "original") {
-        finalContent += copyright + "**本文为原创文章，未经允许禁止转载。**";
-      } else if (article.url) {
-        finalContent += copyright + "**本文转载自：** " + article.url;
-      }
-
       // 处理封面图片
       let bannerUrl = "";
-      if (article.cover) {
+      if (processed.cover) {
         try {
-          logger.debug(`Uploading cover image: ${article.cover}`);
-          const coverUploadResult = await this.uploadImageByUrl(article.cover);
+          logger.debug(`Uploading cover image: ${processed.cover}`);
+          const coverUploadResult = await this.uploadImageByUrl(
+            processed.cover,
+          );
           bannerUrl = coverUploadResult.url;
           logger.debug(`Cover uploaded successfully: ${bannerUrl}`);
         } catch (error) {
@@ -309,13 +296,13 @@ export class Cto51Adapter extends CodeAdapter {
 
       // 构建请求数据
       const postData: Record<string, string> = {
-        title: article.title,
+        title: processed.title,
         content: finalContent,
         pid: "",
-        cate_id: article.category || "",
+        cate_id: processed.category || "",
         custom_id: "0",
-        tag: article.tags?.join(",") || "",
-        abstract: article.summary || "",
+        tag: processed.tags.join(",") || "",
+        abstract: processed.summary || "",
         banner_type: bannerUrl ? "1" : "0",
         banner_url: bannerUrl,
         blog_type: "1",
@@ -323,7 +310,7 @@ export class Cto51Adapter extends CodeAdapter {
         is_hide: "0",
         top_time: "0",
         is_comment: "0",
-        is_old: !!article.markdown ? "0" : "2",
+        is_old: !!processed.content ? "0" : "2",
         blog_id: "",
         did: "",
         work_id: "",
@@ -332,7 +319,7 @@ export class Cto51Adapter extends CodeAdapter {
         import_type: "-1",
         invite_code: "",
         raffle: "",
-        orig: article.articleType === "original" ? "1" : "0",
+        orig: processed.articleType === "original" ? "1" : "0",
         _csrf: this.csrf || "",
       };
 

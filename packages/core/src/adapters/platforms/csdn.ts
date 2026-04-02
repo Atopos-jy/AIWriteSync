@@ -10,6 +10,7 @@ import type {
 } from "../../types";
 import type { PublishOptions } from "../types";
 import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
 
 const logger = createLogger("CSDN");
 
@@ -194,18 +195,6 @@ export class CSDNAdapter extends CodeAdapter {
     options?: PublishOptions,
   ): Promise<SyncResult> {
     return this.withHeaderRules(this.HEADER_RULES, async () => {
-      logger.info("[CSDN] Starting publish process");
-      logger.debug("[CSDN] Article data:", {
-        title: article.title,
-        author: article.author,
-        summary: article.summary,
-        tags: article.tags,
-        category: article.category,
-        articleType: article.articleType,
-        url: article.url,
-        hasCover: !!article.cover,
-      });
-
       // 1. 确保已登录
       if (!this.userInfo) {
         const auth = await this.checkAuth();
@@ -214,16 +203,18 @@ export class CSDNAdapter extends CodeAdapter {
         }
       }
 
-      // ==============================================
-      // 🔥 全字段同步处理
-      // ==============================================
-
-      // 选择内容格式：优先使用markdown，其次是content，最后是html
-      let markdown = article.markdown || article.content || article.html || "";
+      // 使用文章处理器处理内容
+      const processed = ArticleProcessor.processContent(article, {
+        supportsTags: true, // CSDN支持标签
+        supportsSummary: true, // CSDN支持摘要
+        supportsCategory: true, // CSDN支持分类
+        supportsCover: true, // CSDN支持封面
+        supportsAuthor: false, // CSDN使用账号作者
+      });
 
       // Process images in markdown
-      markdown = await this.processImages(
-        markdown,
+      let finalMarkdown = await this.processImages(
+        processed.content,
         (src) => this.uploadImageByUrl(src),
         {
           skipPatterns: ["csdnimg.cn", "csdn.net"],
@@ -232,11 +223,11 @@ export class CSDNAdapter extends CodeAdapter {
       );
 
       // Get HTML content (CSDN API needs both markdown and HTML)
-      let htmlContent = article.html || "";
+      let finalHtml = article.html || "";
 
       // 处理HTML内容
-      htmlContent = await this.processImages(
-        htmlContent,
+      finalHtml = await this.processImages(
+        finalHtml,
         (src) => this.uploadImageByUrl(src),
         {
           skipPatterns: ["csdnimg.cn", "csdn.net"],
@@ -244,34 +235,14 @@ export class CSDNAdapter extends CodeAdapter {
         },
       );
 
-      // CSDN支持标签和摘要，直接使用API字段
-      // 按照要求在文末添加版权声明
-      let finalMarkdown = markdown;
-      let finalHtml = htmlContent;
-
-      // 版权声明处理
-      const copyright = "\n\n";
-      if (article.articleType === "original") {
-        finalMarkdown +=
-          copyright + "**原创声明：** 本文为原创内容，未经授权禁止转载。";
-        finalHtml +=
-          copyright +
-          "<p><strong>原创声明：</strong>本文为原创内容，未经授权禁止转载。</p>";
-      } else if (article.url) {
-        finalMarkdown +=
-          copyright +
-          `**转载声明：** 本文转载自 [${article.url}](${article.url})`;
-        finalHtml +=
-          copyright +
-          `<p><strong>转载声明：</strong>本文转载自 <a href="${article.url}" target="_blank">${article.url}</a></p>`;
-      }
-
       // 处理封面图片
       let coverImages: string[] = [];
-      if (article.cover) {
+      if (processed.cover) {
         try {
-          logger.debug(`Uploading cover image: ${article.cover}`);
-          const coverUploadResult = await this.uploadImageByUrl(article.cover);
+          logger.debug(`Uploading cover image: ${processed.cover}`);
+          const coverUploadResult = await this.uploadImageByUrl(
+            processed.cover,
+          );
           if (coverUploadResult?.url) {
             coverImages.push(coverUploadResult.url);
             logger.debug(
@@ -302,43 +273,6 @@ export class CSDNAdapter extends CodeAdapter {
         articleType === "reprint" && article.url ? article.url : "";
 
       // 保存文章请求
-      logger.info("[CSDN] Saving article");
-      const saveBody = {
-        title: finalTitle,
-        markdowncontent:
-          finalMarkdown.length > 200
-            ? finalMarkdown.substring(0, 200) + "..."
-            : finalMarkdown,
-        content:
-          finalHtml.length > 200
-            ? finalHtml.substring(0, 200) + "..."
-            : finalHtml,
-        readType: "public",
-        level: 0,
-        tags: article.tags?.join(",") || "",
-        description: article.summary || "",
-        brief_content: article.summary || "",
-        status: 2, // 草稿
-        categories: article.category || "",
-        category: article.category || "",
-        type: articleType,
-        original_link: originalLink,
-        authorized_status: false,
-        not_auto_saved: "1",
-        source: "pc_mdeditor",
-        cover_images: coverImages,
-        cover_type: coverImages.length > 0 ? 1 : 0,
-        is_new: 1,
-        vote_id: 0,
-        resource_id: "",
-        pubStatus: "draft",
-        creator_activity_id: "",
-      };
-
-      logger.debug("[CSDN] Save article request:", saveBody);
-      logger.info("[CSDN] Description field value:", article.summary);
-      logger.info("[CSDN] Brief_content field value:", article.summary);
-
       const response = await this.runtime.fetch(
         `https://bizapi.csdn.net${apiPath}`,
         {

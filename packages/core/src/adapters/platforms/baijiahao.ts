@@ -10,6 +10,7 @@ import type {
 } from "../../types";
 import type { PublishOptions } from "../types";
 import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
 
 const logger = createLogger("Baijiahao");
 
@@ -112,11 +113,20 @@ export class BaijiahaoAdapter extends CodeAdapter {
 
       this.authToken = await this.fetchAuthToken();
 
-      // Use pre-processed HTML content directly
-      let content = article.html || "";
+      // 使用文章处理器处理内容
+      const processed = ArticleProcessor.processHtmlContent(article, {
+        supportsTags: false, // 百家号不支持标签
+        supportsSummary: true, // 百家号支持摘要
+        supportsCategory: true, // 百家号支持分类
+        supportsCover: true, // 百家号支持封面
+        supportsAuthor: false, // 百家号使用账号作者
+      });
 
-      content = await this.processImages(
-        content,
+      let finalContent = processed.content;
+
+      // 处理图片
+      finalContent = await this.processImages(
+        finalContent,
         (src) => this.uploadImageByUrl(src),
         {
           skipPatterns: ["baijiahao.baidu.com", "bdstatic.com", "bcebos.com"],
@@ -124,52 +134,12 @@ export class BaijiahaoAdapter extends CodeAdapter {
         },
       );
 
-      // ==============================================
-      // 🔥 全字段同步处理
-      // ==============================================
-      let finalContent = "";
-
-      // 1. 标签处理：百家号不支持标签，在文前添加标签文本
-      if (article.tags && article.tags.length > 0) {
-        const tagsText = article.tags.map((tag) => `#${tag}`).join(" ");
-        finalContent += "<p><strong>标签：</strong>" + tagsText + "</p>\n";
-      }
-
-      // 2. 摘要处理：百家号不支持摘要，在文前添加摘要文本
-      if (article.summary) {
-        finalContent +=
-          "<p><strong>摘要：</strong>" + article.summary + "</p>\n\n";
-      }
-
-      // 3. 作者信息处理
-      if (article.author) {
-        finalContent +=
-          "<p><strong>作者：" + article.author + "</strong></p>\n\n";
-      }
-
-      // 4. 正文内容
-      finalContent += content;
-
-      // 5. 版权声明处理
-      finalContent += "\n\n";
-      if (article.articleType === "original") {
-        finalContent +=
-          "<p><strong>原创声明：</strong>本文为原创内容，未经授权禁止转载。</p>";
-      } else if (article.url) {
-        finalContent +=
-          '<p><strong>转载声明：</strong>本文转载自 <a href="' +
-          article.url +
-          '" target="_blank">' +
-          article.url +
-          "</a></p>";
-      }
-
       // 封面上传处理
       let coverUrl = "";
-      if (article.cover) {
+      if (processed.cover) {
         try {
-          console.log(`[Baijiahao] 开始上传封面: ${article.cover}`);
-          const uploadResult = await this.uploadImageByUrl(article.cover);
+          console.log(`[Baijiahao] 开始上传封面: ${processed.cover}`);
+          const uploadResult = await this.uploadImageByUrl(processed.cover);
           coverUrl = uploadResult.url;
           console.log(`[Baijiahao] 封面上传成功: ${coverUrl}`);
         } catch (error) {
@@ -178,7 +148,7 @@ export class BaijiahaoAdapter extends CodeAdapter {
       }
 
       // 设置原创状态
-      const originalStatus = article.articleType === "original" ? "1" : "0";
+      const originalStatus = processed.articleType === "original" ? "1" : "0";
 
       const response = await this.runtime.fetch(
         "https://baijiahao.baidu.com/pcui/article/save?callback=bjhdraft",
@@ -190,17 +160,17 @@ export class BaijiahaoAdapter extends CodeAdapter {
             token: this.authToken,
           },
           body: new URLSearchParams({
-            title: article.title,
+            title: processed.title,
             content: finalContent,
-            feed_cat: article.category || "1",
+            feed_cat: processed.category || "1",
             len: String(finalContent.length),
             activity_list: JSON.stringify([{ id: 408, is_checked: 0 }]),
             source_reprinted_allow:
-              article.articleType === "original" ? "0" : "1",
+              processed.articleType === "original" ? "0" : "1",
             original_status: originalStatus,
             original_handler_status: "1",
             isBeautify: "false",
-            subtitle: article.summary || "",
+            subtitle: processed.summary || "",
             bjhtopic_id: "",
             bjhtopic_info: "",
             type: "news",

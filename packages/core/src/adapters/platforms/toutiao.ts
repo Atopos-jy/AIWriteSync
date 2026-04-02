@@ -10,6 +10,7 @@ import type {
 } from "../../types";
 import type { PublishOptions } from "../types";
 import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
 
 const logger = createLogger("Toutiao");
 
@@ -92,22 +93,18 @@ export class ToutiaoAdapter extends CodeAdapter {
         throw new Error("头条账号未登录，请先登录 mp.toutiao.com");
       }
 
-      // 2. 处理正文
-      let content = article.html || "";
-      content = content.replace(/<figure[^>]*>\s*<\/figure>/gi, "");
-      content = content.replace(/\n{3,}/g, "\n\n");
-
-      if (article.tags?.length) {
-        const tagsText = article.tags.map((tag) => "#" + tag).join(" ");
-        content = `<p><strong>标签：</strong>${tagsText}</p>\n\n${content}`;
-      }
-      if (article.author) {
-        content = `<p><strong>作者：${article.author}</strong></p>\n\n${content}`;
-      }
+      // 使用文章处理器处理内容（头条使用 HTML 格式）
+      const processed = ArticleProcessor.processHtmlContent(article, {
+        supportsTags: false, // 头条不支持标签字段，需拼接到内容中
+        supportsSummary: false, // 头条不支持摘要字段
+        supportsCategory: false, // 头条不支持分类字段
+        supportsCover: true, // 头条支持封面
+        supportsAuthor: false, // 头条不支持作者字段，需拼接到内容中
+      });
 
       // 处理正文图片（上传后得到原图URL）
-      content = await this.processImages(
-        content,
+      let content = await this.processImages(
+        processed.content,
         (src) => this.uploadImageByUrl(src),
         {
           skipPatterns: ["pstatp.com", "toutiao.com", "byteimg.com"],
@@ -120,14 +117,7 @@ export class ToutiaoAdapter extends CodeAdapter {
         '<div class="pgc-img"><img $1><p class="pgc-img-caption"></p></div>',
       );
 
-      content += "\n\n";
-      if (article.articleType === "original") {
-        content += "<p><strong>本文为原创文章，未经允许禁止转载。</strong></p>";
-      } else if (article.url) {
-        content += `<p><strong>本文转载自：</strong><a href="${article.url}" target="_blank">${article.url}</a></p>`;
-      }
-
-      // 3. 构建发布数据
+      // 构建发布数据
       const extra = JSON.stringify({
         content_source: 100000000402,
         content_word_cnt: content.length,
@@ -144,14 +134,14 @@ export class ToutiaoAdapter extends CodeAdapter {
 
       const titleId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
-      // 4. 获取 CSRF Token
+      // 获取 CSRF Token
       const csrfToken = await this.getCsrfToken();
 
-      // 5. 如果有封面，先上传封面图片
+      // 如果有封面，先上传封面图片
       let coverData = null;
-      if (article.cover) {
-        console.log("[Toutiao] 上传封面图片:", article.cover);
-        const coverUploadResult = await this.uploadImageByUrl(article.cover);
+      if (processed.cover) {
+        console.log("[Toutiao] 上传封面图片:", processed.cover);
+        const coverUploadResult = await this.uploadImageByUrl(processed.cover);
         console.log("[Toutiao] 封面上传成功:", coverUploadResult);
         coverData = {
           cover_url: coverUploadResult.coverUrl || coverUploadResult.url,
@@ -168,16 +158,6 @@ export class ToutiaoAdapter extends CodeAdapter {
 
       // 6. 通过 content script 执行发布流程
       const tabId = await this.ensureToutiaoTab();
-      console.log("[Toutiao] Executing publish in tab:", tabId);
-      console.log("[Toutiao] Calling executeScript with params:", {
-        csrfToken: csrfToken.substring(0, 20) + "...",
-        contentLength: content.length,
-        title: article.title,
-        hasCover: !!coverData,
-        extraLength: extra.length,
-        titleId: titleId,
-        draftOnly: options?.draftOnly ?? true,
-      });
 
       const result = await this.runtime.tabs?.executeScript<
         { success: boolean; data?: any; error?: string },
@@ -325,7 +305,7 @@ export class ToutiaoAdapter extends CodeAdapter {
         [
           csrfToken,
           content,
-          article.title,
+          processed.title,
           extra,
           titleId,
           options?.draftOnly ?? true,

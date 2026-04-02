@@ -10,6 +10,7 @@ import type {
   PlatformMeta,
 } from "../../types";
 import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
 
 const logger = createLogger("Yidian");
 
@@ -97,27 +98,27 @@ export class YidianAdapter extends CodeAdapter {
   async publish(article: Article): Promise<SyncResult> {
     const now = Date.now();
     try {
-      // Use pre-processed HTML content directly
-      let content = article.html || "";
+      // 使用文章处理器处理内容（一点号使用 HTML 格式）
+      const processed = ArticleProcessor.processHtmlContent(article, {
+        supportsTags: true, // 一点号支持标签字段
+        supportsSummary: true, // 一点号支持摘要字段
+        supportsCategory: true, // 一点号支持分类字段
+        supportsCover: true, // 一点号支持封面
+        supportsAuthor: false, // 一点号不支持作者字段
+      });
 
       // Process images
-      content = await this.processImages(content, (src) =>
+      let content = await this.processImages(processed.content, (src) =>
         this.uploadImageByUrl(src),
       );
 
-      // 添加版权声明
-      content += "\n\n";
-      if (article.articleType === "original") {
-        content += "<p><strong>本文为原创文章，未经允许禁止转载。</strong></p>";
-      } else if (article.url) {
-        content += "<p><strong>本文转载自：</strong>" + article.url + "</p>";
-      }
-
       // 处理封面图
       let covers = "[]";
-      if (article.cover) {
+      if (processed.cover) {
         try {
-          const coverUploadResult = await this.uploadImageByUrl(article.cover);
+          const coverUploadResult = await this.uploadImageByUrl(
+            processed.cover,
+          );
           covers = JSON.stringify([coverUploadResult.url]);
         } catch (error) {
           logger.error("Failed to upload cover image:", error);
@@ -134,15 +135,15 @@ export class YidianAdapter extends CodeAdapter {
             "Content-Type": "application/x-www-form-urlencoded",
           },
           body: new URLSearchParams({
-            title: article.title,
-            cate: article.category || "",
+            title: processed.title,
+            cate: processed.category || "",
             cateB: "",
-            coverType: article.cover ? "custom" : "default",
+            coverType: processed.cover ? "custom" : "default",
             covers: covers,
             content: content,
-            hasSubTitle: article.summary ? "1" : "0",
-            subTitle: article.summary || "",
-            original: article.articleType === "original" ? "1" : "0",
+            hasSubTitle: processed.summary ? "1" : "0",
+            subTitle: processed.summary || "",
+            original: processed.articleType === "original" ? "1" : "0",
             reward: "0",
             videos: "[]",
             audios: "[]",
@@ -163,7 +164,7 @@ export class YidianAdapter extends CodeAdapter {
             image_urls: "{}",
             minTimingHour: "3",
             maxTimingDay: "7",
-            tags: JSON.stringify(article.tags || []),
+            tags: JSON.stringify(processed.tags || []),
             isPubed: "false",
             lastSaveTime: "",
             dirty: "false",

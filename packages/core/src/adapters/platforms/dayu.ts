@@ -10,6 +10,7 @@ import type {
 } from "../../types";
 import type { PublishOptions } from "../types";
 import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
 
 const logger = createLogger("DaYu");
 
@@ -173,16 +174,17 @@ export class DaYuAdapter extends CodeAdapter {
         }
       }
 
-      // ==============================================
-      // 🔥 全字段同步处理
-      // ==============================================
+      // 使用文章处理器处理内容
+      const processed = ArticleProcessor.processHtmlContent(article, {
+        supportsTags: false, // 大鱼号不支持标签字段
+        supportsSummary: false, // 大鱼号不支持摘要字段
+        supportsCategory: false, // 大鱼号不支持分类
+        supportsCover: true, // 大鱼号支持封面
+        supportsAuthor: true, // 大鱼号支持作者字段
+      });
 
-      // 选择内容格式：优先使用html，其次是content，最后是markdown
-      let content = article.html || article.content || article.markdown || "";
-
-      // Process images
-      content = await this.processImages(
-        content,
+      let finalContent = await this.processImages(
+        processed.content,
         (src) => this.uploadImageByUrl(src),
         {
           skipPatterns: ["dayu.com", "uc.cn"],
@@ -190,50 +192,14 @@ export class DaYuAdapter extends CodeAdapter {
         },
       );
 
-      // 大鱼号不支持标签和摘要字段，需要在正文前拼接
-      let finalContent = "";
-
-      // 1. 标签处理：大鱼号不支持标签，在文前添加标签文本
-      if (article.tags && article.tags.length > 0) {
-        const tagsText = article.tags.map((tag) => `#${tag}`).join(" ");
-        finalContent += "<p><strong>标签：</strong>" + tagsText + "</p>\n";
-      }
-
-      // 2. 摘要处理：大鱼号不支持摘要，在文前添加摘要文本
-      if (article.summary) {
-        finalContent +=
-          "<p><strong>摘要：</strong>" + article.summary + "</p>\n\n";
-      }
-
-      // 3. 作者信息处理
-      if (article.author) {
-        finalContent +=
-          "<p><strong>作者：" + article.author + "</strong></p>\n\n";
-      }
-
-      // 4. 正文内容
-      finalContent += content;
-
-      // 5. 版权声明处理
-      finalContent += "\n\n";
-      if (article.articleType === "original") {
-        finalContent +=
-          "<p><strong>本文为原创文章，未经允许禁止转载。</strong></p>";
-      } else if (article.url) {
-        finalContent +=
-          '<p><strong>本文转载自：</strong><a href="' +
-          article.url +
-          '" target="_blank">' +
-          article.url +
-          "</a></p>";
-      }
-
-      // 6. 处理封面图片
+      // 处理封面图片
       let coverImg = "";
-      if (article.cover) {
+      if (processed.cover) {
         try {
-          logger.debug(`Uploading cover image: ${article.cover}`);
-          const coverUploadResult = await this.uploadImageByUrl(article.cover);
+          logger.debug(`Uploading cover image: ${processed.cover}`);
+          const coverUploadResult = await this.uploadImageByUrl(
+            processed.cover,
+          );
           // 查找上传的封面图片
           const coverImage = this.uploadedImages.find(
             (img) => img.url === coverUploadResult.url,
@@ -256,15 +222,15 @@ export class DaYuAdapter extends CodeAdapter {
         logger.debug(`Using first uploaded image as cover: ${coverImg}`);
       }
 
-      // 7. 保存草稿
+      // 保存草稿
       const formData = new URLSearchParams();
-      formData.append("title", article.title);
+      formData.append("title", processed.title);
       formData.append("content", finalContent);
-      formData.append("author", article.author || this.cacheMeta!.title);
+      formData.append("author", processed.author || this.cacheMeta!.title);
       formData.append("coverImg", coverImg);
       formData.append(
         "article_type",
-        article.articleType === "original" ? "1" : "2",
+        processed.articleType === "original" ? "1" : "2",
       );
       formData.append("utoken", this.cacheMeta!.utoken);
       formData.append("cover_from", "auto");

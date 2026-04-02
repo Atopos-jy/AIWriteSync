@@ -11,6 +11,7 @@ import type {
 } from "../../types";
 import type { PublishOptions } from "../types";
 import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
 
 const logger = createLogger("Jianshu");
 
@@ -73,7 +74,16 @@ export class JianshuAdapter extends CodeAdapter {
       logger.info("[Jianshu] 开始同步流程，执行全字段规则");
       await this.refreshTokens();
 
-      // 1. 分类 (Category) 处理：寻找匹配的文集
+      // 1. 使用文章处理器处理内容（简书不支持标签和摘要字段，需拼接到内容中）
+      const processed = ArticleProcessor.processHtmlContent(article, {
+        supportsTags: false, // 简书不支持标签字段
+        supportsSummary: false, // 简书不支持摘要字段
+        supportsCategory: true, // 简书支持分类
+        supportsCover: true, // 简书支持封面
+        supportsAuthor: false, // 简书使用账号作者
+      });
+
+      // 2. 分类 (Category) 处理：寻找匹配的文集
       const notebooksRes = await this.runtime.fetch(
         "https://www.jianshu.com/author/notebooks",
         {
@@ -88,10 +98,11 @@ export class JianshuAdapter extends CodeAdapter {
       const notebooks = await notebooksRes.json();
       // 如果目标平台支持分类则同步，简书对应 Notebook
       const targetNotebook =
-        notebooks.find((n: any) => n.name === article.category) || notebooks[0];
+        notebooks.find((n: any) => n.name === processed.category) ||
+        notebooks[0];
       const notebookId = targetNotebook.id;
 
-      // 2. 创建初始草稿 ID
+      // 3. 创建初始草稿 ID
       const createRes = await this.runtime.fetch(
         "https://www.jianshu.com/author/notes",
         {
@@ -104,7 +115,7 @@ export class JianshuAdapter extends CodeAdapter {
           body: JSON.stringify({
             at_bottom: false,
             notebook_id: notebookId,
-            title: article.title,
+            title: processed.title,
           }),
         },
       );
@@ -112,46 +123,19 @@ export class JianshuAdapter extends CodeAdapter {
       const draftId = createData.id;
       if (!draftId) throw new Error("创建简书草稿失败");
 
-      // 3. 封面图 (Cover) 处理：必须同步到目标平台封面字段
+      // 4. 封面图处理（使用处理后的封面）
       let coverUrl = "";
-      if (article.cover) {
+      if (processed.cover) {
         try {
-          const res = await this.uploadImageByUrl(article.cover);
+          const res = await this.uploadImageByUrl(processed.cover);
           coverUrl = res.url;
         } catch (e) {
           logger.warn("[Jianshu] 封面上传失败，跳过封面设置", e);
         }
       }
 
-      // 4. 正文拼接规则引擎
-      // 顺序：标签（不支持平台） -> 摘要（不支持平台） -> 正文内容 -> 版权声明
-      let prefixHtml = "";
-      let suffixHtml = "";
-
-      // 4.1 标签处理：简书不支持标签字段，拼接在最前
-      if (article.tags && article.tags.length > 0) {
-        const tagsText = article.tags.map((tag) => "#" + tag).join(" ");
-        prefixHtml += `<p><strong>标签：</strong>${tagsText}</p>\n`;
-      }
-
-      // 4.2 摘要处理：简书不支持摘要字段，拼接在标签下方
-      if (article.summary) {
-        prefixHtml += `<p><strong>摘要：</strong>${article.summary}</p>\n<hr />\n`;
-      }
-
-      // 4.3 版权声明处理：文末追加
-      if (
-        article.articleType === "original" ||
-        article.articleType === "原创"
-      ) {
-        suffixHtml += `\n<hr />\n<p><strong>本文为原创文章，未经允许禁止转载。</strong></p>`;
-      } else if (article.url) {
-        suffixHtml += `\n<hr />\n<p><strong>本文转载自：</strong><a href="${article.url}" target="_blank">${article.url}</a></p>`;
-      }
-
-      // 5. 组合最终 HTML 并处理图片转存
-      let finalContent =
-        prefixHtml + (article.html || article.content || "") + suffixHtml;
+      // 5. 处理图片转存
+      let finalContent = processed.content;
 
       finalContent = await this.processImages(
         finalContent,
@@ -175,7 +159,7 @@ export class JianshuAdapter extends CodeAdapter {
             Referer: "https://www.jianshu.com/writer",
           },
           body: JSON.stringify({
-            title: article.title,
+            title: processed.title,
             content: finalContent,
             autosave_control: 1,
             image_url: coverUrl || undefined, // 封面图同步

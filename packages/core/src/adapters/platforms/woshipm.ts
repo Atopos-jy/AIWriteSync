@@ -10,6 +10,7 @@ import type {
 } from "../../types";
 import type { PublishOptions } from "../types";
 import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
 
 const logger = createLogger("Woshipm");
 
@@ -125,40 +126,24 @@ export class WoshipmAdapter extends CodeAdapter {
     return this.withHeaderRules(this.HEADER_RULES, async () => {
       logger.info("Starting publish...");
 
-      // 1. 使用预处理好的 HTML（Content Script 已处理代码块、图片、特殊标签等）
-      // 人人都是产品经理使用 HTML 格式
-      let content = article.html || "";
+      // 使用文章处理器处理内容（人人都是产品经理使用 HTML 格式）
+      const processed = ArticleProcessor.processHtmlContent(article, {
+        supportsTags: false, 
+        supportsSummary: false, 
+        supportsCategory: false,
+        supportsCover: false, 
+        supportsAuthor: false, 
+      });
 
-      // 标签处理：人人都是产品经理不支持标签字段，在文前添加标签文本
-      if (article.tags && article.tags.length > 0) {
-        const tagsText = article.tags.map((tag) => "#" + tag).join(" ");
-        content =
-          "<p><strong>标签：</strong>" + tagsText + "</p>\n\n" + content;
-      }
-
-      // 摘要处理：人人都是产品经理不支持摘要字段，在标签下方添加摘要文本
-      if (article.summary) {
-        content =
-          "<p><strong>摘要：</strong>" + article.summary + "</p>\n\n" + content;
-      }
-
-      // 2. 处理图片
-      content = await this.processImages(
-        content,
+      // 处理图片
+      let content = await this.processImages(
+        processed.content,
         (src) => this.uploadImageByUrl(src),
         {
           skipPatterns: ["woshipm.com", "image.woshipm.com"],
           onProgress: options?.onImageProgress,
         },
       );
-
-      // 添加版权声明
-      content += "\n\n";
-      if (article.articleType === "original") {
-        content += "<p><strong>本文为原创文章，未经允许禁止转载。</strong></p>";
-      } else if (article.url) {
-        content += "<p><strong>本文转载自：</strong>" + article.url + "</p>";
-      }
 
       // 4. 创建草稿
       const createResponse = await this.runtime.fetch(
@@ -172,7 +157,7 @@ export class WoshipmAdapter extends CodeAdapter {
           },
           body: new URLSearchParams({
             action: "add_draft",
-            post_title: article.title,
+            post_title: processed.title,
             post_content: content,
           }),
         },

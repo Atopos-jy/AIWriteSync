@@ -10,6 +10,7 @@ import type {
 } from "../../types";
 import type { PublishOptions } from "../types";
 import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
 
 const logger = createLogger("Cnblogs");
 
@@ -150,19 +151,17 @@ export class CnblogsAdapter extends CodeAdapter {
       // 保存 xsrfToken 供 uploadImageByUrl 使用
       this.xsrfToken = xsrfToken;
 
-      // ==============================================
-      // 🔥 全字段同步处理
-      // ==============================================
+      // 使用文章处理器处理内容
+      const processed = ArticleProcessor.processContent(article, {
+        supportsTags: true, // 博客园支持标签
+        supportsSummary: true, // 博客园支持摘要
+        supportsCategory: true, // 博客园支持分类
+        supportsCover: true, // 博客园支持封面
+        supportsAuthor: true, // 博客园支持作者字段
+      });
 
-      // 选择内容格式：优先使用markdown，其次是content，最后是html
-      let markdown = article.markdown || article.content || article.html || "";
-      logger.debug(
-        "Markdown before processImages:",
-        markdown.substring(0, 200),
-      );
-
-      markdown = await this.processImages(
-        markdown,
+      let finalMarkdown = await this.processImages(
+        processed.content,
         (src) => this.uploadImageByUrl(src),
         {
           skipPatterns: [
@@ -174,22 +173,10 @@ export class CnblogsAdapter extends CodeAdapter {
         },
       );
 
-      logger.debug("Markdown after processImages:", markdown.substring(0, 200));
-
-      // 博客园支持标签和摘要，直接使用API字段
-      // 按照要求在文末添加版权声明
-      let finalMarkdown = markdown;
-
-      // 版权声明处理
-      const copyright = "\n\n";
-      if (article.articleType === "original") {
-        finalMarkdown +=
-          copyright + "**原创声明：** 本文为原创内容，未经授权禁止转载。";
-      } else if (article.url) {
-        finalMarkdown +=
-          copyright +
-          `**转载声明：** 本文转载自 [${article.url}](${article.url})`;
-      }
+      logger.debug(
+        "Markdown after processImages:",
+        finalMarkdown.substring(0, 200),
+      );
 
       // 3. Build request headers
       const headers: Record<string, string> = {
@@ -200,12 +187,14 @@ export class CnblogsAdapter extends CodeAdapter {
       logger.debug("Request headers:", JSON.stringify(headers));
       logger.debug("Markdown content length:", finalMarkdown.length);
 
-      // 处理封面图片
+      // 处理封面图片（使用处理后的封面）
       let featuredImage: string | null = null;
-      if (article.cover) {
+      if (processed.cover) {
         try {
-          logger.debug(`Uploading cover image: ${article.cover}`);
-          const coverUploadResult = await this.uploadImageByUrl(article.cover);
+          logger.debug(`Uploading cover image: ${processed.cover}`);
+          const coverUploadResult = await this.uploadImageByUrl(
+            processed.cover,
+          );
           featuredImage = coverUploadResult.url;
           logger.debug(`Cover uploaded successfully: ${featuredImage}`);
         } catch (error) {
@@ -214,9 +203,11 @@ export class CnblogsAdapter extends CodeAdapter {
         }
       }
 
-      // 设置文章类型：原创或转载
+      // 设置文章类型：原创或转载（使用处理后的类型和URL）
       const sourceUrl =
-        article.articleType !== "original" && article.url ? article.url : null;
+        processed.articleType !== "original" && processed.url
+          ? processed.url
+          : null;
 
       // 4. 创建草稿
       const response = await this.runtime.fetch(
@@ -229,11 +220,11 @@ export class CnblogsAdapter extends CodeAdapter {
             id: null,
             postType: 2, // 2 = 文章, 1 = 随笔
             accessPermission: 0,
-            title: article.title,
+            title: processed.title,
             url: null,
             postBody: finalMarkdown,
             categoryIds: null,
-            categories: article.category ? [article.category] : null,
+            categories: processed.category ? [processed.category] : null,
             collectionIds: [],
             inSiteCandidate: false,
             inSiteHome: false,
@@ -248,12 +239,12 @@ export class CnblogsAdapter extends CodeAdapter {
             isOnlyForRegisterUser: false,
             isUpdateDateAdded: false,
             entryName: null,
-            description: article.summary || null,
+            description: processed.summary || null,
             featuredImage: featuredImage,
-            tags: article.tags || null,
+            tags: processed.tags || null,
             password: null,
-            publishAt: article.publishDate
-              ? new Date(article.publishDate).toISOString()
+            publishAt: processed.publishDate
+              ? new Date(processed.publishDate).toISOString()
               : null,
             datePublished: new Date().toISOString(),
             dateUpdated: null,
@@ -262,7 +253,7 @@ export class CnblogsAdapter extends CodeAdapter {
             autoDesc: null,
             changePostType: false,
             blogId: 0,
-            author: article.author || null,
+            author: processed.author || null,
             removeScript: false,
             clientInfo: null,
             changeCreatedTime: false,

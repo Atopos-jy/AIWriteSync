@@ -15,10 +15,10 @@ import type {
 } from "../../types";
 import type { PublishOptions } from "../types";
 import { CodeAdapter } from "../code-adapter";
-import { htmlToMarkdown } from "../../lib/turndown";
 import { createLogger } from "../../lib/logger";
 import { parseMarkdownImages } from "../../lib/markdown-images";
 import JSZip from "jszip";
+import { ArticleProcessor } from "../article-processor";
 
 const logger = createLogger("ZipDownload");
 
@@ -52,39 +52,22 @@ export class ZipDownloadAdapter extends CodeAdapter {
       const zip = new JSZip();
       const imgFolder = zip.folder("images")!;
 
-      // 获取 Markdown 内容
-      let markdown = article.markdown || htmlToMarkdown(article.html || "");
+      // 使用文章处理器处理内容（下载适配器使用 Markdown 格式）
+      const processed = ArticleProcessor.processContent(article, {
+        supportsTags: false, // 下载适配器不支持标签字段，需拼接到内容中
+        supportsSummary: false, // 下载适配器不支持摘要字段，需拼接到内容中
+        supportsCategory: false, // 下载适配器不支持分类字段
+        supportsCover: false, // 下载适配器不支持封面
+        supportsAuthor: false, // 下载适配器不支持作者字段
+      });
+
+      // 获取处理后的 Markdown 内容
+      let markdown = processed.content;
 
       if (!markdown.trim()) {
         return this.createResult(false, {
           error: "文章内容为空",
         });
-      }
-
-      // 添加标题
-      const title = article.title || "未命名文章";
-      if (!markdown.startsWith("# ")) {
-        markdown = `# ${title}\n\n${markdown}`;
-      }
-
-      // 添加标签：在文前添加标签文本
-      if (article.tags && article.tags.length > 0) {
-        const tagsText = article.tags.map((tag) => "#" + tag).join(" ");
-        markdown = `**标签：**${tagsText}\n\n${markdown}`;
-      }
-
-      // 添加摘要：在标签下方添加摘要文本
-      if (article.summary) {
-        markdown = `**摘要：**${article.summary}\n\n${markdown}`;
-      }
-
-      // 添加版权声明：在文末拼接版权信息
-      markdown += "\n\n";
-      if (article.articleType === "original") {
-        markdown += "**本文为原创文章，未经允许禁止转载。**";
-      } else if (article.url) {
-        markdown +=
-          "**本文转载自：** [" + article.url + "](" + article.url + ")";
       }
 
       // 处理图片：下载并替换为相对路径
@@ -105,7 +88,7 @@ export class ZipDownloadAdapter extends CodeAdapter {
       });
 
       // 使用 runtime.downloads 下载
-      const filename = this.sanitizeFilename(title) + ".zip";
+      const filename = this.sanitizeFilename(processed.title) + ".zip";
 
       if (!this.runtime.downloads) {
         return this.createResult(false, {

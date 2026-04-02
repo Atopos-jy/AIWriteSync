@@ -12,6 +12,7 @@ import type { DoubanImageData } from "../../lib";
 import type { PublishOptions } from "../types";
 import { markdownToDraft } from "../../lib";
 import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
 
 const logger = createLogger("Douban");
 
@@ -139,12 +140,23 @@ export class DoubanAdapter extends CodeAdapter {
         }
       }
 
-      // 2. 封面图处理
+      // 使用文章处理器处理内容
+      const processed = ArticleProcessor.processContent(article, {
+        supportsTags: true, // 豆瓣支持标签
+        supportsSummary: true, // 豆瓣支持摘要
+        supportsCategory: false, // 豆瓣不支持分类
+        supportsCover: true, // 豆瓣支持封面
+        supportsAuthor: false, // 豆瓣使用账号作者
+      });
+
+      // 封面图处理
       let coverUrl: string | null = null;
-      if (article.cover) {
+      if (processed.cover) {
         try {
-          logger.debug("Uploading cover image:", article.cover);
-          const coverResult = await this.uploadImageWithFullData(article.cover);
+          logger.debug("Uploading cover image:", processed.cover);
+          const coverResult = await this.uploadImageWithFullData(
+            processed.cover,
+          );
           coverUrl = coverResult.url;
           logger.debug("Cover uploaded successfully:", coverUrl);
         } catch (error) {
@@ -152,13 +164,10 @@ export class DoubanAdapter extends CodeAdapter {
         }
       }
 
-      // 3. 正文内容处理
-      let content = article.markdown || "";
-
       // 处理文章内容中的图片
       const imageDataMap = new Map<string, DoubanImageData>();
-      content = await this.processImages(
-        content,
+      let content = await this.processImages(
+        processed.content,
         async (src) => {
           const result = await this.uploadImageWithFullData(src);
           imageDataMap.set(result.url, result.imageData);
@@ -170,30 +179,22 @@ export class DoubanAdapter extends CodeAdapter {
         },
       );
 
-      // 4. 添加版权声明
-      if (article.articleType === "original") {
-        content += "\n\n**本文为原创文章，未经允许禁止转载。**";
-      } else if (article.url) {
-        content +=
-          "\n\n**本文转载自：** [" + article.url + "](" + article.url + ")";
-      }
-
-      // 5. Markdown to Draft.js format
+      // Markdown to Draft.js format
       const draftContent = markdownToDraft(content, imageDataMap);
 
-      // 6. 构建请求数据
+      // 构建请求数据
       const postData: Record<string, string> = {
         is_rich: "1",
         note_id: this.formData!.note_id,
-        note_title: article.title,
+        note_title: processed.title,
         note_text: draftContent,
-        introduction: article.summary || "",
+        introduction: processed.summary || "",
         note_privacy: "P",
         cannot_reply: "",
-        author_tags: article.tags?.join(",") || "",
+        author_tags: processed.tags.join(",") || "",
         accept_donation: "",
         donation_notice: "",
-        is_original: article.articleType === "original" ? "1" : "",
+        is_original: processed.articleType === "original" ? "1" : "",
         ck: this.formData!.ck,
       };
 
