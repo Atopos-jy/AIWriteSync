@@ -1,6 +1,5 @@
 /**
  * 掘金适配器 - 标准同步实现
- * 参考简书等平台的标准实现模式，添加详细日志
  */
 import { CodeAdapter, type ImageUploadResult } from "../code-adapter";
 import type {

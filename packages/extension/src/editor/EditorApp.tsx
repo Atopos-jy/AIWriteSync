@@ -1610,7 +1610,7 @@ export function EditorApp() {
                 />
               </div>
 
-              {/* 封面提示（对标CSDN） */}
+              {/* 封面提示 */}
               <div className="flex-1 text-sm text-gray-500">
                 <p>• 封面图会显示在文章列表和分享卡片中</p>
                 <p>• 推荐使用 1200x630 像素的图片，效果最佳</p>
@@ -1619,7 +1619,7 @@ export function EditorApp() {
             </div>
           </div>
 
-          {/* 新增：文章摘要模块（对标现有布局） */}
+          {/* 文章摘要模块 */}
           <div className="mb-6">
             <label className="block text-gray-700 font-normal mb-2 text-base">
               文章摘要
@@ -1731,9 +1731,9 @@ export function EditorApp() {
           </div>
 
           {/* 原创声明  */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+          <div className="mb-6">
             {/* 文章类型（原创/转载） */}
-            <div>
+            <div className="mb-4">
               <label className="block text-gray-700 font-normal mb-2 text-base">
                 文章类型
               </label>
@@ -1778,6 +1778,19 @@ export function EditorApp() {
                 </label>
               </div>
             </div>
+
+            {/* 转载链接 */}
+            {article.articleType === "reprint" && (
+              <div>
+                <input
+                  type="text"
+                  value={article.url || ""}
+                  onChange={(e) => updateArticle("url", e.target.value)}
+                  placeholder="请输入原文链接"
+                  className="w-1/2 px-3 py-2 border border-gray-200 rounded focus:outline-none focus:border-blue-300 text-sm"
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>
