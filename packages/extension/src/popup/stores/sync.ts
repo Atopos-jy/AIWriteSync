@@ -380,17 +380,75 @@ export const useSyncStore = create<SyncState>((set, get) => ({
       logger.debug("loadArticle - current tab:", tab?.url);
       if (!tab?.id) return;
 
-      const response = await chrome.tabs.sendMessage(tab.id, {
-        type: "EXTRACT_ARTICLE",
-      });
-      logger.debug("loadArticle - response:", response);
+      // 添加重试机制，确保content script已加载且service worker已启动
+      let response;
+      let attempts = 0;
+      const maxAttempts = 3;
+      let delay = 200;
+
+      while (attempts < maxAttempts) {
+        try {
+          logger.debug(
+            `loadArticle - sending message to tab ${tab.id}, attempt ${attempts + 1}`,
+          );
+          response = await chrome.tabs.sendMessage(tab.id, {
+            type: "EXTRACT_ARTICLE",
+          });
+          logger.debug("loadArticle - response:", response);
+          break; // 成功，退出循环
+        } catch (error: any) {
+          attempts++;
+          logger.warn(
+            `loadArticle - attempt ${attempts} failed:`,
+            error.message,
+          );
+
+          // 检查是否是"接收端不存在"的错误
+          if (
+            error.message &&
+            error.message.includes("Receiving end does not exist")
+          ) {
+            if (attempts < maxAttempts) {
+              logger.info(`loadArticle - waiting ${delay}ms before retry...`);
+              await new Promise((resolve) => setTimeout(resolve, delay));
+              delay *= 2; // 指数退避
+            } else {
+              logger.error(
+                "loadArticle - all attempts failed: Content script not available",
+              );
+              set({ error: "内容提取失败：页面脚本未加载，请刷新页面重试" });
+            }
+          } else {
+            // 其他错误，直接抛出
+            throw error;
+          }
+        }
+      }
+
       if (response?.article) {
         set({ article: response.article });
         // 追踪内容特征
         trackArticleProfile(response.article, "popup");
+      } else if (response === undefined) {
+        logger.warn("loadArticle - no response from content script");
+        set({ error: "无法连接到页面脚本，请刷新页面重试" });
       }
-    } catch (error) {
+    } catch (error: any) {
       logger.error("Failed to extract article:", error);
+      // 区分不同类型的错误
+      if (
+        error.message &&
+        error.message.includes("Receiving end does not exist")
+      ) {
+        set({ error: "无法连接到页面脚本，请刷新页面重试" });
+      } else if (
+        error.message &&
+        error.message.includes("Could not establish connection")
+      ) {
+        set({ error: "无法建立连接，请确保扩展已正确安装" });
+      } else {
+        set({ error: `提取文章失败: ${error.message}` });
+      }
     }
   },
 
