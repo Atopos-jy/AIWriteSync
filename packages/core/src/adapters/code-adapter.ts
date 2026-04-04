@@ -20,22 +20,28 @@
  * 2. 处理图片上传 (如果平台需要)
  * 3. 调用平台 API
  */
-import type { Article, AuthResult, SyncResult, PlatformMeta, HeaderRule } from '../types'
-import type { RuntimeInterface } from '../runtime/interface'
-import type { PlatformAdapter, PublishOptions } from './types'
-import { createLogger } from '../lib/logger'
-import { parseMarkdownImages } from '../lib/markdown-images'
+import type {
+  Article,
+  AuthResult,
+  SyncResult,
+  PlatformMeta,
+  HeaderRule,
+} from "../types";
+import type { RuntimeInterface } from "../runtime/interface";
+import type { PlatformAdapter, PublishOptions } from "./types";
+import { createLogger } from "../lib/logger";
+import { parseMarkdownImages } from "../lib/markdown-images";
 
-const logger = createLogger('CodeAdapter')
+const logger = createLogger("CodeAdapter");
 
 /**
  * 图片上传结果
  */
 export interface ImageUploadResult {
   /** 新的图片 URL */
-  url: string
+  url: string;
   /** 额外的 img 属性 */
-  attrs?: Record<string, string | number>
+  attrs?: Record<string, string | number>;
 }
 
 /**
@@ -43,29 +49,32 @@ export interface ImageUploadResult {
  */
 export interface ImageProcessOptions {
   /** 跳过匹配这些模式的图片 */
-  skipPatterns?: string[]
+  skipPatterns?: string[];
   /** 进度回调 */
-  onProgress?: (current: number, total: number) => void
+  onProgress?: (current: number, total: number) => void;
 }
 
 /**
  * 代码适配器基类
  */
 export abstract class CodeAdapter implements PlatformAdapter {
-  abstract readonly meta: PlatformMeta
-  protected runtime!: RuntimeInterface
+  abstract readonly meta: PlatformMeta;
+  protected runtime!: RuntimeInterface;
 
   /** Header 规则 ID 列表（用于请求拦截） */
-  protected headerRuleIds: string[] = []
+  protected headerRuleIds: string[] = [];
 
   async init(runtime: RuntimeInterface): Promise<void> {
-    this.runtime = runtime
+    this.runtime = runtime;
   }
 
   // ============ 抽象方法，子类必须实现 ============
 
-  abstract checkAuth(): Promise<AuthResult>
-  abstract publish(article: Article, options?: PublishOptions): Promise<SyncResult>
+  abstract checkAuth(): Promise<AuthResult>;
+  abstract publish(
+    article: Article,
+    options?: PublishOptions,
+  ): Promise<SyncResult>;
 
   // ============ Header 规则管理 ============
 
@@ -74,24 +83,28 @@ export abstract class CodeAdapter implements PlatformAdapter {
    * @param rule 规则配置
    * @returns 规则 ID
    */
-  protected async addHeaderRule(rule: Omit<HeaderRule, 'id'>): Promise<string | null> {
-    if (!this.runtime.headerRules) return null
+  protected async addHeaderRule(
+    rule: Omit<HeaderRule, "id">,
+  ): Promise<string | null> {
+    if (!this.runtime.headerRules) return null;
 
-    const ruleId = await this.runtime.headerRules.add(rule)
-    this.headerRuleIds.push(ruleId)
-    return ruleId
+    const ruleId = await this.runtime.headerRules.add(rule);
+    this.headerRuleIds.push(ruleId);
+    return ruleId;
   }
 
   /**
    * 批量添加 Header 规则
    * @param rules 规则配置列表
    */
-  protected async addHeaderRules(rules: Array<Omit<HeaderRule, 'id'>>): Promise<void> {
+  protected async addHeaderRules(
+    rules: Array<Omit<HeaderRule, "id">>,
+  ): Promise<void> {
     for (const rule of rules) {
-      await this.addHeaderRule(rule)
+      await this.addHeaderRule(rule);
     }
     if (this.headerRuleIds.length > 0) {
-      logger.debug(`[${this.meta.id}] Header rules added:`, this.headerRuleIds)
+      logger.debug(`[${this.meta.id}] Header rules added:`, this.headerRuleIds);
     }
   }
 
@@ -99,13 +112,13 @@ export abstract class CodeAdapter implements PlatformAdapter {
    * 清除所有已添加的 Header 规则
    */
   protected async clearHeaderRules(): Promise<void> {
-    if (!this.runtime.headerRules || this.headerRuleIds.length === 0) return
+    if (!this.runtime.headerRules || this.headerRuleIds.length === 0) return;
 
     for (const ruleId of this.headerRuleIds) {
-      await this.runtime.headerRules.remove(ruleId)
+      await this.runtime.headerRules.remove(ruleId);
     }
-    logger.debug(`[${this.meta.id}] Header rules cleared:`, this.headerRuleIds)
-    this.headerRuleIds = []
+    logger.debug(`[${this.meta.id}] Header rules cleared:`, this.headerRuleIds);
+    this.headerRuleIds = [];
   }
 
   /**
@@ -115,14 +128,14 @@ export abstract class CodeAdapter implements PlatformAdapter {
    * @param fn 要执行的操作
    */
   protected async withHeaderRules<T>(
-    rules: Array<Omit<HeaderRule, 'id'>>,
-    fn: () => Promise<T>
+    rules: Array<Omit<HeaderRule, "id">>,
+    fn: () => Promise<T>,
   ): Promise<T> {
-    await this.addHeaderRules(rules)
+    await this.addHeaderRules(rules);
     try {
-      return await fn()
+      return await fn();
     } finally {
-      await this.clearHeaderRules()
+      await this.clearHeaderRules();
     }
   }
 
@@ -131,13 +144,16 @@ export abstract class CodeAdapter implements PlatformAdapter {
   /**
    * GET 请求
    */
-  protected async get<T = unknown>(url: string, headers?: Record<string, string>): Promise<T> {
+  protected async get<T = unknown>(
+    url: string,
+    headers?: Record<string, string>,
+  ): Promise<T> {
     const response = await this.runtime.fetch(url, {
-      method: 'GET',
-      credentials: 'include',
+      method: "GET",
+      credentials: "include",
       headers,
-    })
-    return this.parseResponse<T>(response)
+    });
+    return this.parseResponse<T>(response);
   }
 
   /**
@@ -146,18 +162,18 @@ export abstract class CodeAdapter implements PlatformAdapter {
   protected async postJson<T = unknown>(
     url: string,
     data: Record<string, unknown>,
-    headers?: Record<string, string>
+    headers?: Record<string, string>,
   ): Promise<T> {
     const response = await this.runtime.fetch(url, {
-      method: 'POST',
-      credentials: 'include',
+      method: "POST",
+      credentials: "include",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         ...headers,
       },
       body: JSON.stringify(data),
-    })
-    return this.parseResponse<T>(response)
+    });
+    return this.parseResponse<T>(response);
   }
 
   /**
@@ -166,18 +182,18 @@ export abstract class CodeAdapter implements PlatformAdapter {
   protected async postForm<T = unknown>(
     url: string,
     data: Record<string, string>,
-    headers?: Record<string, string>
+    headers?: Record<string, string>,
   ): Promise<T> {
     const response = await this.runtime.fetch(url, {
-      method: 'POST',
-      credentials: 'include',
+      method: "POST",
+      credentials: "include",
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        "Content-Type": "application/x-www-form-urlencoded",
         ...headers,
       },
       body: new URLSearchParams(data),
-    })
-    return this.parseResponse<T>(response)
+    });
+    return this.parseResponse<T>(response);
   }
 
   /**
@@ -186,15 +202,15 @@ export abstract class CodeAdapter implements PlatformAdapter {
   protected async postMultipart<T = unknown>(
     url: string,
     formData: FormData,
-    headers?: Record<string, string>
+    headers?: Record<string, string>,
   ): Promise<T> {
     const response = await this.runtime.fetch(url, {
-      method: 'POST',
-      credentials: 'include',
+      method: "POST",
+      credentials: "include",
       headers,
       body: formData,
-    })
-    return this.parseResponse<T>(response)
+    });
+    return this.parseResponse<T>(response);
   }
 
   /**
@@ -202,16 +218,16 @@ export abstract class CodeAdapter implements PlatformAdapter {
    */
   private async parseResponse<T>(response: Response): Promise<T> {
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const text = await response.text()
+    const text = await response.text();
 
     // 尝试解析 JSON
     try {
-      return JSON.parse(text) as T
+      return JSON.parse(text) as T;
     } catch {
-      return text as T
+      return text as T;
     }
   }
 
@@ -228,92 +244,106 @@ export abstract class CodeAdapter implements PlatformAdapter {
   protected async processImages(
     content: string,
     uploadFn: (src: string) => Promise<ImageUploadResult>,
-    options?: ImageProcessOptions
+    options?: ImageProcessOptions,
   ): Promise<string> {
-    const { skipPatterns = [], onProgress } = options || {}
+    const { skipPatterns = [], onProgress } = options || {};
 
     // 提取所有图片（HTML + Markdown）
-    const matches: { full: string; src: string; alt?: string; type: 'html' | 'markdown' }[] = []
+    const matches: {
+      full: string;
+      src: string;
+      alt?: string;
+      type: "html" | "markdown";
+    }[] = [];
 
     // 1. HTML 格式: <img ... src="url" ...>
-    const htmlImgRegex = /<img[^>]+src="([^"]+)"[^>]*>/gi
-    let match
+    const htmlImgRegex = /<img[^>]+src="([^"]+)"[^>]*>/gi;
+    let match;
     while ((match = htmlImgRegex.exec(content)) !== null) {
-      matches.push({ full: match[0], src: match[1], type: 'html' })
+      matches.push({ full: match[0], src: match[1], type: "html" });
     }
 
     // 2. Markdown 格式: ![alt](url)
     for (const mdMatch of parseMarkdownImages(content)) {
-      matches.push({ full: mdMatch.full, src: mdMatch.src, alt: mdMatch.alt, type: 'markdown' })
+      matches.push({
+        full: mdMatch.full,
+        src: mdMatch.src,
+        alt: mdMatch.alt,
+        type: "markdown",
+      });
     }
 
     if (matches.length === 0) {
-      return content
+      return content;
     }
 
-    logger.debug(`Found ${matches.length} images to process (HTML + Markdown)`)
+    logger.debug(`Found ${matches.length} images to process (HTML + Markdown)`);
 
-    let result = content
-    const uploadedMap = new Map<string, ImageUploadResult>()
-    let processed = 0
+    let result = content;
+    const uploadedMap = new Map<string, ImageUploadResult>();
+    let processed = 0;
 
     for (const { full, src, alt, type } of matches) {
       // 跳过空 src
-      if (!src) continue
+      if (!src) continue;
 
       // 跳过匹配的模式（但不跳过 data URI）
-      if (!src.startsWith('data:')) {
-        const shouldSkip = skipPatterns.some(pattern => src.includes(pattern))
+      if (!src.startsWith("data:")) {
+        const shouldSkip = skipPatterns.some((pattern) =>
+          src.includes(pattern),
+        );
         if (shouldSkip) {
-          logger.debug(`Skipping matched pattern: ${src}`)
-          continue
+          logger.debug(`Skipping matched pattern: ${src}`);
+          continue;
         }
       }
 
-      processed++
-      onProgress?.(processed, matches.length)
+      processed++;
+      onProgress?.(processed, matches.length);
 
       try {
         // 检查是否已上传过
-        let uploadResult = uploadedMap.get(src)
+        let uploadResult = uploadedMap.get(src);
 
         if (!uploadResult) {
-          logger.debug(`Uploading image ${processed}/${matches.length}: ${src.startsWith('data:') ? 'data URI' : src}`)
+          logger.debug(
+            `Uploading image ${processed}/${matches.length}: ${src.startsWith("data:") ? "data URI" : src}`,
+          );
           // uploadFn 应该能处理 URL 和 data URI（通过 fetch）
-          uploadResult = await uploadFn(src)
-          uploadedMap.set(src, uploadResult)
+          uploadResult = await uploadFn(src);
+          uploadedMap.set(src, uploadResult);
         }
 
         // 根据格式构建替换内容
-        let replacement: string
-        if (type === 'html') {
+        let replacement: string;
+        if (type === "html") {
           // HTML 格式
-          replacement = `<img src="${uploadResult.url}"`
+          replacement = `<img src="${uploadResult.url}"`;
           if (uploadResult.attrs) {
             for (const [key, value] of Object.entries(uploadResult.attrs)) {
-              replacement += ` ${key}="${value}"`
+              replacement += ` ${key}="${value}"`;
             }
           }
-          replacement += ' />'
+          replacement += " />";
         } else {
           // Markdown 格式
-          replacement = `![${alt || ''}](${uploadResult.url})`
+          replacement = `![${alt || ""}](${uploadResult.url})`;
         }
 
         // 替换原内容
-        result = result.replace(full, replacement)
+        result = result.replace(full, replacement);
 
-        logger.debug(`Image uploaded: ${uploadResult.url}`)
+        logger.debug(`Image uploaded: ${uploadResult.url}`);
       } catch (error) {
-        logger.error(`Failed to upload image: ${src}`, error)
+        logger.error(`Failed to upload image: ${src}`, error);
         // 继续处理其他图片
       }
 
       // 避免请求过快
-      await this.delay(300)
+      await this.delay(300);
     }
 
-    return result
+    return result;
   }
 
   /**
@@ -321,7 +351,7 @@ export abstract class CodeAdapter implements PlatformAdapter {
    * 默认实现抛出错误
    */
   protected async uploadImageByUrl(_src: string): Promise<ImageUploadResult> {
-    throw new Error('uploadImageByUrl not implemented')
+    throw new Error("uploadImageByUrl not implemented");
   }
 
   /**
@@ -330,9 +360,9 @@ export abstract class CodeAdapter implements PlatformAdapter {
    * 子类可以覆盖以提供更优的实现
    */
   async uploadImage(file: Blob, _filename?: string): Promise<string> {
-    const dataUri = await this.blobToDataUri(file)
-    const result = await this.uploadImageByUrl(dataUri)
-    return result.url
+    const dataUri = await this.blobToDataUri(file);
+    const result = await this.uploadImageByUrl(dataUri);
+    return result.url;
   }
 
   /**
@@ -340,26 +370,26 @@ export abstract class CodeAdapter implements PlatformAdapter {
    */
   protected async blobToDataUri(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
-      const reader = new FileReader()
+      const reader = new FileReader();
       reader.onload = () => {
-        const result = reader.result
-        if (typeof result === 'string') {
-          resolve(result)
+        const result = reader.result;
+        if (typeof result === "string") {
+          resolve(result);
         } else {
-          reject(new Error('Failed to read blob as data URI'))
+          reject(new Error("Failed to read blob as data URI"));
         }
-      }
-      reader.onerror = () => reject(new Error('FileReader error'))
-      reader.readAsDataURL(blob)
-    })
+      };
+      reader.onerror = () => reject(new Error("FileReader error"));
+      reader.readAsDataURL(blob);
+    });
   }
 
   /**
    * data URI 转 Blob
    */
   protected async dataUriToBlob(dataUri: string): Promise<Blob> {
-    const response = await fetch(dataUri)
-    return response.blob()
+    const response = await fetch(dataUri);
+    return response.blob();
   }
 
   // ============ 工具方法 ============
@@ -368,18 +398,21 @@ export abstract class CodeAdapter implements PlatformAdapter {
    * 延迟
    */
   protected delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms))
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
    * 创建同步结果
    */
-  protected createResult(success: boolean, data?: Partial<SyncResult>): SyncResult {
+  protected createResult(
+    success: boolean,
+    data?: Partial<SyncResult>,
+  ): SyncResult {
     return {
       platform: this.meta.id,
       success,
       timestamp: Date.now(),
       ...data,
-    }
+    };
   }
 }

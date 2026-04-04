@@ -85,42 +85,105 @@ export class WeiboAdapter extends CodeAdapter {
       return this.userConfig;
     }
 
-    const response = await this.runtime.fetch(
-      "https://card.weibo.com/article/v5/editor",
-      {
-        credentials: "include",
-      },
-    );
-    const html = await response.text();
+    const maxRetries = 3;
+    let lastError: Error | null = null;
 
-    const configMatch = html.match(/config:\s*JSON\.parse\('(.+?)'\)/);
-    if (!configMatch) {
-      logger.error("Failed to find config in HTML");
-      return null;
-    }
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        logger.debug(`Fetching config (attempt ${attempt}/${maxRetries})`);
 
-    try {
-      const configJson = configMatch[1]
-        .replace(/\\'/g, "'")
-        .replace(/\\\\/g, "\\");
-      const config = JSON.parse(configJson);
+        const response = await this.runtime.fetch(
+          "https://card.weibo.com/article/v5/editor",
+          {
+            credentials: "include",
+            headers: {
+              "Cache-Control": "no-cache",
+            },
+          },
+        );
 
-      if (!config.uid) {
-        return null;
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const html = await response.text();
+
+        if (!html || html.length < 1000) {
+          throw new Error("Incomplete HTML content received");
+        }
+
+        // 检查页面是否包含关键元素，确保页面加载完整
+        if (!html.includes("card.weibo.com") && !html.includes("article")) {
+          throw new Error("Page content appears to be incomplete");
+        }
+
+        // 尝试多种匹配模式，提高兼容性
+        let configMatch: RegExpMatchArray | null = null;
+
+        // 模式1: config: JSON.parse('...')
+        configMatch = html.match(/config:\s*JSON\.parse\('(.+?)'\)/);
+
+        // 模式2: window.$CONFIG = {...}
+        if (!configMatch) {
+          configMatch = html.match(/window\.\$CONFIG\s*=\s*({[\s\S]*?});/);
+        }
+
+        // 模式3: $CONFIG = {...}
+        if (!configMatch) {
+          configMatch = html.match(/\$CONFIG\s*=\s*({[\s\S]*?});/);
+        }
+
+        // 模式4: var config = {...}
+        if (!configMatch) {
+          configMatch = html.match(/var\s+config\s*=\s*({[\s\S]*?});/);
+        }
+
+        // 模式5: config = {...}
+        if (!configMatch) {
+          configMatch = html.match(/config\s*=\s*({[\s\S]*?});/);
+        }
+
+        if (!configMatch) {
+          throw new Error("Config pattern not found in HTML");
+        }
+
+        let configJson = configMatch[1];
+
+        // 处理不同格式的JSON字符串
+        if (configJson.startsWith("'")) {
+          configJson = configJson.replace(/\\'/g, "'").replace(/\\\\/g, "\\");
+        }
+
+        const config = JSON.parse(configJson);
+
+        if (!config.uid) {
+          throw new Error("Config found but missing uid");
+        }
+
+        this.userConfig = {
+          uid: String(config.uid),
+          nick: config.nick || "",
+          avatar_large: config.avatar_large || "",
+        };
+
+        logger.debug("User config retrieved successfully");
+        return this.userConfig;
+      } catch (e) {
+        lastError = e as Error;
+        logger.warn(`Config fetch attempt ${attempt} failed:`, e);
+
+        if (attempt < maxRetries) {
+          // 等待后重试
+          await this.delay(1000 * attempt);
+        }
       }
-
-      this.userConfig = {
-        uid: String(config.uid),
-        nick: config.nick || "",
-        avatar_large: config.avatar_large || "",
-      };
-
-      logger.debug("User config:", this.userConfig);
-      return this.userConfig;
-    } catch (e) {
-      logger.error("Failed to parse config:", e);
-      return null;
     }
+
+    logger.error(
+      "Failed to retrieve config after multiple attempts:",
+      lastError,
+    );
+    return null;
   }
 
   async publish(

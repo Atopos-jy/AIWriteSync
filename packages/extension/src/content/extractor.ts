@@ -3,7 +3,7 @@
  * 从当前页面提取文章内容
  *
  * 提取策略:
- * 1. 特定平台提取器 (微信公众号等)
+ * 1. 平台适配器提取 (优先，精准提取)
  * 2. Safari ReaderArticleFinder (通用，效果最佳)
  * 3. Mozilla Readability (通用，作为回退)
  * 4. <article> 标签 (最后手段)
@@ -26,6 +26,8 @@ import {
   restoreCodeBlocks,
   type PreprocessResult,
 } from "../lib/content-processor";
+import { matchCurrentPlatform } from "@wechatsync/core";
+import { initAdapters } from "../adapters";
 
 const logger = createLogger("Extractor");
 
@@ -51,15 +53,57 @@ interface ExtractedArticle {
 /**
  * 提取文章内容
  */
-function extractArticle(): ExtractedArticle | null {
-  const url = window.location.href;
+async function extractArticle(): Promise<ExtractedArticle | null> {
+  try {
+    // 初始化适配器
+    await initAdapters();
 
-  // 微信公众号
-  if (url.includes("mp.weixin.qq.com")) {
-    return extractWeixinArticle();
+    // 1. 平台适配器提取（优先）
+    const platformAdapter = await matchCurrentPlatform();
+    if (platformAdapter && typeof platformAdapter.extract === "function") {
+      logger.info(
+        `[提取验证] 使用平台专用提取器: ${platformAdapter.meta.name} (${platformAdapter.meta.id})`,
+      );
+      console.log(
+        `[提取验证] 使用平台专用提取器: ${platformAdapter.meta.name} (${platformAdapter.meta.id})`,
+      );
+      const extractResult = platformAdapter.extract();
+      if (extractResult && extractResult.title && extractResult.content) {
+        // 克隆内容元素进行处理
+        const clonedContent = extractResult.content.cloneNode(
+          true,
+        ) as HTMLElement;
+
+        // 预处理克隆的内容
+        preprocessContentDOM(clonedContent);
+
+        // 获取 HTML 并转换为 Markdown
+        const html = clonedContent.innerHTML;
+        const markdown = htmlToMarkdownNative(html);
+
+        return {
+          title: extractResult.title,
+          markdown,
+          html,
+          summary: extractResult.excerpt,
+          cover: extractResult.leadingImage,
+          tags: [],
+          category: undefined,
+          publishedDate: undefined,
+          source: {
+            url: window.location.href,
+            platform: extractResult.extractor || platformAdapter.meta.id,
+          },
+        };
+      }
+    }
+  } catch (error) {
+    logger.error("Platform adapter extraction failed:", error);
   }
 
-  // 通用提取 (使用 Safari Reader / Readability)
+  // 2. 通用提取 (使用 Safari Reader / Readability)
+  logger.info("[提取验证] 使用通用提取方法");
+  console.log("[提取验证] 使用通用提取方法");
   return extractGenericArticle();
 }
 
@@ -603,22 +647,35 @@ window.addEventListener("message", async (event) => {
  */
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "EXTRACT_ARTICLE") {
-    const article = extractArticle();
-    sendResponse({ article });
+    extractArticle()
+      .then((article) => {
+        sendResponse({ article });
+      })
+      .catch((error) => {
+        logger.error("Extract article error:", error);
+        sendResponse({ article: null });
+      });
+    return true; // 保持端口开放，等待异步操作完成
   } else if (message.type === "OPEN_EDITOR") {
-    // 打开编辑器
-    const article = extractArticle();
-    if (article) {
-      // 传递平台列表和已选中的平台 ID
-      openEditor(
-        article,
-        message.platforms || [],
-        message.selectedPlatforms || [],
-      );
-      sendResponse({ success: true });
-    } else {
-      sendResponse({ success: false, error: "无法提取文章内容" });
-    }
+    extractArticle()
+      .then((article) => {
+        if (article) {
+          // 传递平台列表和已选中的平台 ID
+          openEditor(
+            article,
+            message.platforms || [],
+            message.selectedPlatforms || [],
+          );
+          sendResponse({ success: true });
+        } else {
+          sendResponse({ success: false, error: "无法提取文章内容" });
+        }
+      })
+      .catch((error) => {
+        logger.error("Open editor error:", error);
+        sendResponse({ success: false, error: "打开编辑器失败" });
+      });
+    return true; // 保持端口开放，等待异步操作完成
   } else if (message.type === "PREPROCESS_FOR_PLATFORMS") {
     // 为多个平台预处理内容（由 background 调用）
     const { rawHtml, platforms, configs } = message.payload as {

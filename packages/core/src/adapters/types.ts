@@ -129,6 +129,9 @@ export interface PlatformAdapter {
   /** 发布文章 */
   publish(article: Article, options?: PublishOptions): Promise<SyncResult>;
 
+  /** 匹配当前页面是否属于该平台 */
+  match?(): Promise<boolean>;
+
   /** 上传图片 (如果支持) */
   uploadImage?(file: Blob, filename?: string): Promise<string>;
 
@@ -143,6 +146,15 @@ export interface PlatformAdapter {
 
   /** 删除文章 (如果支持) */
   delete?(postId: string): Promise<void>;
+
+  /** 提取文章内容 (提取器适配器使用) */
+  extract?(): {
+    title: string;
+    content: HTMLElement | null;
+    excerpt?: string;
+    leadingImage?: string;
+    extractor: string;
+  };
 }
 
 /**

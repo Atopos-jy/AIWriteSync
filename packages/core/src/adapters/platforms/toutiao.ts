@@ -209,9 +209,7 @@ export class ToutiaoAdapter extends CodeAdapter {
                 thumb_width: coverData.image_width,
                 thumb_height: coverData.image_height,
               };
-              console.log("[ContentScript] Cover object:", coverObject);
               pgcFeedCovers = JSON.stringify([coverObject]);
-              console.log("[ContentScript] pgcFeedCovers:", pgcFeedCovers);
               draftFormData.coverType = 1;
               draftFormData.cover = [coverObject];
             }
