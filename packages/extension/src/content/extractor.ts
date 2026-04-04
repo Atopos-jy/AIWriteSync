@@ -26,7 +26,6 @@ import {
   restoreCodeBlocks,
   type PreprocessResult,
 } from "../lib/content-processor";
-import { url } from "inspector";
 
 const logger = createLogger("Extractor");
 

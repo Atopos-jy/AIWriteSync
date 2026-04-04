@@ -1,8 +1,6 @@
 import { marked } from "marked";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import Underline from "@tiptap/extension-underline";
-import Link from "@tiptap/extension-link";
 import Image from "@tiptap/extension-image";
 import { Article } from "./EditorApp";
 
@@ -67,11 +65,10 @@ export function TipTapEditor({
             class: "mb-4",
           },
         },
-      }),
-      Underline,
-      Link.configure({
-        HTMLAttributes: {
-          class: "text-blue-600 hover:underline",
+        link: {
+          HTMLAttributes: {
+            class: "text-blue-600 hover:underline",
+          },
         },
       }),
       Image.configure({
