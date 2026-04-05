@@ -120,14 +120,30 @@ export class ImoocAdapter extends CodeAdapter {
    */
   async publish(article: Article, options?: any): Promise<SyncResult> {
     return this.withHeaderRules(this.HEADER_RULES, async () => {
-      // 使用文章处理器处理内容
-      const processed = ArticleProcessor.processContent(article, {
-        supportsTags: true, // 慕课网支持标签
-        supportsSummary: true, // 慕课网支持摘要
-        supportsCategory: true, // 慕课网支持分类
-        supportsCover: true, // 慕课网支持封面
-        supportsAuthor: true, // 慕课网支持作者字段
-      });
+      // 根据 preprocessConfig.outputFormat 选择使用哪种格式
+      let processed;
+      if (this.preprocessConfig?.outputFormat === "markdown") {
+        // 使用 markdown 格式
+        processed = ArticleProcessor.processContent(
+          { ...article, content: article.markdown },
+          {
+            supportsTags: true,
+            supportsSummary: true,
+            supportsCategory: true,
+            supportsCover: true,
+            supportsAuthor: true,
+          },
+        );
+      } else {
+        // 使用 html 格式
+        processed = ArticleProcessor.processHtmlContent(article, {
+          supportsTags: true,
+          supportsSummary: true,
+          supportsCategory: true,
+          supportsCover: true,
+          supportsAuthor: true,
+        });
+      }
 
       // 封面图处理
       let coverUrl: string | null = null;
