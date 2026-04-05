@@ -357,11 +357,74 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     }
 
     try {
-      // 首先检查是否有从页面按钮点击传来的待同步文章
+      // 首先尝试从当前标签页提取最新文章（优先获取最新内容）
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      logger.debug("loadArticle - current tab:", tab?.url);
+      if (tab?.id) {
+        // 添加重试机制，确保content script已加载且service worker已启动
+        let response;
+        let attempts = 0;
+        const maxAttempts = 3;
+        let delay = 200;
+        let extractSuccess = false;
+
+        while (attempts < maxAttempts && !extractSuccess) {
+          try {
+            logger.debug(
+              `loadArticle - sending message to tab ${tab.id}, attempt ${attempts + 1}`,
+            );
+            response = await chrome.tabs.sendMessage(tab.id, {
+              type: "EXTRACT_ARTICLE",
+            });
+            logger.debug("loadArticle - response:", response);
+
+            if (response?.article) {
+              set({ article: response.article });
+              // 追踪内容特征
+              trackArticleProfile(response.article, "popup");
+              extractSuccess = true;
+            }
+            break; // 成功或没有文章都退出循环
+          } catch (error: any) {
+            attempts++;
+            logger.warn(
+              `loadArticle - attempt ${attempts} failed:`,
+              error.message,
+            );
+
+            // 检查是否是"接收端不存在"的错误
+            if (
+              error.message &&
+              error.message.includes("Receiving end does not exist")
+            ) {
+              if (attempts < maxAttempts) {
+                logger.info(`loadArticle - waiting ${delay}ms before retry...`);
+                await new Promise((resolve) => setTimeout(resolve, delay));
+                delay *= 2; // 指数退避
+              }
+            } else {
+              // 其他错误，直接抛出
+              throw error;
+            }
+          }
+        }
+
+        // 如果成功提取到文章，直接返回
+        if (extractSuccess) {
+          // 清除可能存在的旧 pendingArticle
+          await chrome.storage.local.remove("pendingArticle");
+          return;
+        }
+      }
+
+      // 如果从当前页面提取失败，再检查是否有待同步文章（作为备用）
       const storage = await chrome.storage.local.get("pendingArticle");
       if (storage.pendingArticle) {
         logger.debug(
-          "loadArticle - found pending article:",
+          "loadArticle - found pending article as fallback:",
           storage.pendingArticle.title,
         );
         set({ article: storage.pendingArticle });
@@ -372,67 +435,8 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         return;
       }
 
-      // 如果没有待同步文章，尝试从当前标签页提取
-      const [tab] = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
-      logger.debug("loadArticle - current tab:", tab?.url);
-      if (!tab?.id) return;
-
-      // 添加重试机制，确保content script已加载且service worker已启动
-      let response;
-      let attempts = 0;
-      const maxAttempts = 3;
-      let delay = 200;
-
-      while (attempts < maxAttempts) {
-        try {
-          logger.debug(
-            `loadArticle - sending message to tab ${tab.id}, attempt ${attempts + 1}`,
-          );
-          response = await chrome.tabs.sendMessage(tab.id, {
-            type: "EXTRACT_ARTICLE",
-          });
-          logger.debug("loadArticle - response:", response);
-          break; // 成功，退出循环
-        } catch (error: any) {
-          attempts++;
-          logger.warn(
-            `loadArticle - attempt ${attempts} failed:`,
-            error.message,
-          );
-
-          // 检查是否是"接收端不存在"的错误
-          if (
-            error.message &&
-            error.message.includes("Receiving end does not exist")
-          ) {
-            if (attempts < maxAttempts) {
-              logger.info(`loadArticle - waiting ${delay}ms before retry...`);
-              await new Promise((resolve) => setTimeout(resolve, delay));
-              delay *= 2; // 指数退避
-            } else {
-              logger.error(
-                "loadArticle - all attempts failed: Content script not available",
-              );
-              set({ error: "内容提取失败：页面脚本未加载，请刷新页面重试" });
-            }
-          } else {
-            // 其他错误，直接抛出
-            throw error;
-          }
-        }
-      }
-
-      if (response?.article) {
-        set({ article: response.article });
-        // 追踪内容特征
-        trackArticleProfile(response.article, "popup");
-      } else if (response === undefined) {
-        logger.warn("loadArticle - no response from content script");
-        set({ error: "无法连接到页面脚本，请刷新页面重试" });
-      }
+      // 如果都失败了，才设置错误信息
+      set({ error: "无法提取文章内容，请确保在文章页面使用扩展" });
     } catch (error: any) {
       logger.error("Failed to extract article:", error);
       // 区分不同类型的错误
