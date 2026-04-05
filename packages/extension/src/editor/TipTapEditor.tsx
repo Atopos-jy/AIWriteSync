@@ -1,4 +1,3 @@
-import { marked } from "marked";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
@@ -15,29 +14,8 @@ export function TipTapEditor({
   onChange,
   onEditorReady,
 }: TipTapEditorProps) {
-  console.log("TipTapEditor - article.content:", article.content);
-  console.log("TipTapEditor - content type:", typeof article.content);
-
-  // 转换包含 Markdown 的 HTML 内容
-  let content = article.content || "";
-
-  // 如果内容包含 Markdown 语法，进行转换
-  if (
-    content.includes("#") ||
-    content.includes("**") ||
-    content.includes("* ") ||
-    content.includes("1. ")
-  ) {
-    // 提取 HTML 标签中的文本内容
-    const tempDiv = document.createElement("div");
-    tempDiv.innerHTML = content;
-    const textContent = tempDiv.textContent || tempDiv.innerText || "";
-
-    // 将纯文本 Markdown 转换为 HTML
-    if (textContent.includes("#") || textContent.includes("**")) {
-      content = marked.parse(textContent) as string;
-    }
-  }
+  // 直接使用 article.content，不做任何转换
+  const content = article.content || "";
 
   const editor = useEditor({
     extensions: [

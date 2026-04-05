@@ -15,13 +15,11 @@ import {
   Image,
   Strikethrough,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
+
 import { cn } from "@/lib/utils";
 import { createLogger } from "../lib/logger";
 import { useDebounce } from "use-debounce";
-import { htmlToMarkdownNative } from "@wechatsync/core";
+import { htmlToMarkdownNative, markdownToHtml } from "@wechatsync/core";
 import { marked } from "marked";
 import { TipTapEditor } from "./TipTapEditor";
 const logger = createLogger("Editor");
@@ -396,149 +394,52 @@ export function EditorApp() {
       if (nextIsMDMode === isMDMode) return;
 
       if (nextIsMDMode) {
-        // 富文本 -> Markdown
-        const html =
+        // 富文本 → Markdown
+        const currentHtml =
           tiptapEditor?.getHTML() ??
           richContentRef.current?.innerHTML ??
-          article.html ??
           article.content ??
           "";
-        const md = htmlToMarkdownNative(html);
+        const md = htmlToMarkdownNative(currentHtml); // 使用完善的转换函数
         setArticle((prev) =>
-          prev ? { ...prev, content: md, markdown: md, html: html } : prev,
+          prev
+            ? {
+                ...prev,
+                content: md, // 当前编辑器内容改为 Markdown
+                markdown: md,
+                html: currentHtml,
+              }
+            : prev,
         );
         setIsMDMode(true);
         setEditorMode("edit");
-        return;
+      } else {
+        // Markdown → 富文本
+        const currentMd =
+          mdContentRef.current?.value ??
+          article.markdown ??
+          article.content ??
+          "";
+        const html = markdownToHtml(currentMd); // 使用完善的转换函数
+        setArticle((prev) =>
+          prev
+            ? {
+                ...prev,
+                content: html, // 当前编辑器内容改为 HTML
+                markdown: currentMd,
+                html: html,
+              }
+            : prev,
+        );
+        setIsMDMode(false);
       }
-
-      // Markdown -> 富文本（优先取 textarea 的最新值）
-      const md =
-        mdContentRef.current?.value ??
-        article.markdown ??
-        article.content ??
-        "";
-      const html = marked.parse(md) as string;
-      setArticle((prev) =>
-        prev ? { ...prev, content: html, markdown: md, html: html } : prev,
-      );
-      setIsMDMode(false);
     },
     [article, isMDMode, tiptapEditor],
   );
 
   const renderMarkdown = useCallback((content: string) => {
-    return (
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeRaw]}
-        components={{
-          h1: ({ children, ...props }) => (
-            <h1 {...props} className="text-3xl font-bold mt-8 mb-4">
-              {children}
-            </h1>
-          ),
-          h2: ({ children, ...props }) => (
-            <h2 {...props} className="text-2xl font-bold mt-6 mb-3">
-              {children}
-            </h2>
-          ),
-          h3: ({ children, ...props }) => (
-            <h3 {...props} className="text-xl font-bold mt-5 mb-2">
-              {children}
-            </h3>
-          ),
-          h4: ({ children, ...props }) => (
-            <h4 {...props} className="text-lg font-bold mt-4 mb-2">
-              {children}
-            </h4>
-          ),
-          h5: ({ children, ...props }) => (
-            <h5 {...props} className="text-md font-bold mt-3 mb-2">
-              {children}
-            </h5>
-          ),
-          h6: ({ children, ...props }) => (
-            <h6 {...props} className="text-sm font-bold mt-2 mb-2">
-              {children}
-            </h6>
-          ),
-          p: ({ children, ...props }) => (
-            <p {...props} className="mb-4">
-              {children}
-            </p>
-          ),
-          ul: ({ children, ...props }) => (
-            <ul {...props} className="list-disc pl-6 mb-4">
-              {children}
-            </ul>
-          ),
-          ol: ({ children, ...props }) => (
-            <ol {...props} className="list-decimal pl-6 mb-4">
-              {children}
-            </ol>
-          ),
-          li: ({ children, ...props }) => (
-            <li {...props} className="mb-2">
-              {children}
-            </li>
-          ),
-          strong: ({ children, ...props }) => (
-            <strong {...props} className="font-bold">
-              {children}
-            </strong>
-          ),
-          em: ({ children, ...props }) => (
-            <em {...props} className="italic">
-              {children}
-            </em>
-          ),
-          u: ({ children, ...props }) => (
-            <u {...props} className="underline">
-              {children}
-            </u>
-          ),
-          s: ({ children, ...props }) => (
-            <s {...props} className="line-through">
-              {children}
-            </s>
-          ),
-          img: ({ ...props }) => (
-            <img
-              {...props}
-              className="max-w-full h-auto my-4 rounded-lg shadow-md"
-            />
-          ),
-          a: ({ ...props }) => (
-            <a
-              {...props}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-600 hover:underline"
-            />
-          ),
-          code: ({
-            inline,
-            ...props
-          }: {
-            inline?: boolean;
-            [key: string]: any;
-          }) =>
-            inline ? (
-              <code
-                {...props}
-                className="bg-gray-100 px-1 py-0.5 rounded text-sm"
-              />
-            ) : (
-              <pre className="bg-gray-800 text-white p-4 rounded-lg overflow-x-auto my-4">
-                <code {...props} />
-              </pre>
-            ),
-        }}
-      >
-        {content}
-      </ReactMarkdown>
-    );
+    const html = marked.parse(content, { async: false }) as string;
+    return <div dangerouslySetInnerHTML={{ __html: html }} />;
   }, []);
 
   //自动保存到本地
@@ -594,20 +495,25 @@ export function EditorApp() {
         logger.debug("Received message:", data);
 
         if (data.type === "ARTICLE_DATA") {
-          let content = data.article.content || "";
-          // 如果提供了 html 和 markdown，根据当前模式选择
-          if (data.article.html && data.article.markdown) {
-            content = isMDMode ? data.article.markdown : data.article.html;
-          } else if (data.article.html && isMDMode) {
-            content = htmlToMarkdownNative(data.article.html);
-          } else if (data.article.markdown && !isMDMode) {
-            content = marked.parse(data.article.markdown) as string;
+          let html = data.article.html || data.article.content || "";
+          let markdown = data.article.markdown || "";
+
+          // 如果只提供了 markdown，没有 html，则转换
+          if (!html && markdown) {
+            html = markdownToHtml(markdown);
           }
+          // 如果只提供了 html，没有 markdown，则生成一个
+          if (!markdown && html) {
+            markdown = htmlToMarkdownNative(html);
+          }
+
+          // 根据当前模式决定显示哪种格式（但两种都存储）
+          const content = isMDMode ? markdown : html;
           setArticle({
             title: data.article.title || "",
             author: data.article.author || "",
             summary: data.article.summary || "",
-            content,
+            content, // 当前编辑器使用的内容
             cover: data.article.cover || "",
             tags: data.article.tags || [],
             url: data.article.url || "",
@@ -615,6 +521,8 @@ export function EditorApp() {
             articleType: data.article.articleType || "",
             publishDate:
               data.article.publishDate || data.article.publishedAt || "",
+            html: html, // 保留两种格式
+            markdown: markdown,
           });
           // 设置初始内容
           // if (contentRef.current && data.article.content) {
@@ -830,23 +738,30 @@ export function EditorApp() {
   const handleSync = () => {
     if (!article || selectedPlatforms.size === 0) return;
 
-    const editedTitle = isMDMode
-      ? article.title
-      : titleRef.current?.innerText || article.title;
-    const editedContent = isMDMode
-      ? (mdContentRef.current?.value ?? article.content)
-      : (richContentRef.current?.innerHTML ?? article.content);
+    // 确保 article.content 就是当前编辑器显示的内容
+    // 如果当前是 MD 模式，但 article.content 存的是 HTML，需要临时转换？不，切换模式时我们已经更新了 article.content
+    // 但为了避免用户未切换模式直接同步，仍需保证一致性
+    let finalHtml: string;
+    let finalMarkdown: string;
+
+    if (isMDMode) {
+      // 当前显示 Markdown，从 textarea 获取最新值（可能未触发 onUpdate）
+      const currentMd = mdContentRef.current?.value ?? article.content;
+      finalMarkdown = currentMd;
+      finalHtml = markdownToHtml(currentMd);
+    } else {
+      // 当前显示 HTML，从 TipTap 获取最新值
+      const currentHtml = tiptapEditor?.getHTML() ?? article.content;
+      finalHtml = currentHtml;
+      finalMarkdown = htmlToMarkdownNative(currentHtml);
+    }
 
     const editedArticle = {
       ...article,
-      title: editedTitle,
-      content: editedContent,
-      html:
-        article.html ??
-        (isMDMode ? marked.parse(editedContent) : editedContent),
-      markdown:
-        article.markdown ??
-        (isMDMode ? editedContent : htmlToMarkdownNative(editedContent)),
+      title: titleRef.current?.innerText || article.title,
+      content: isMDMode ? finalMarkdown : finalHtml, // 保存当前模式对应的格式
+      html: finalHtml,
+      markdown: finalMarkdown,
     };
 
     // 生成 syncId（在发送消息前设置，以便立即过滤消息）
