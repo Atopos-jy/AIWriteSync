@@ -54,6 +54,13 @@ interface ExtractedArticle {
  * 提取文章内容
  */
 async function extractArticle(): Promise<ExtractedArticle | null> {
+  // 2. 微信公众号专用提取（如果平台适配器失败）
+  const url = window.location.href;
+  if (url.includes("mp.weixin.qq.com")) {
+    logger.info("[提取验证] 使用微信公众号专用提取器");
+    console.log("[提取验证] 使用微信公众号专用提取器");
+    return extractWeixinArticle();
+  }
   try {
     // 初始化适配器
     await initAdapters();
@@ -101,7 +108,7 @@ async function extractArticle(): Promise<ExtractedArticle | null> {
     logger.error("Platform adapter extraction failed:", error);
   }
 
-  // 2. 通用提取 (使用 Safari Reader / Readability)
+  // 3. 通用提取 (使用 Safari Reader / Readability)
   logger.info("[提取验证] 使用通用提取方法");
   console.log("[提取验证] 使用通用提取方法");
   return extractGenericArticle();

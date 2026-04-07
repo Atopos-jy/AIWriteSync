@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
   X,
   Check,
@@ -38,6 +39,28 @@ export interface Article {
   //文章字段
   html?: string;
   markdown?: string;
+}
+
+interface DropdownProps {
+  children: React.ReactNode;
+  position: { top: number; left: number };
+}
+
+function Dropdown({ children, position }: DropdownProps) {
+  return createPortal(
+    <div
+      style={{
+        position: "fixed",
+        top: position.top,
+        left: position.left,
+        zIndex: 999999,
+      }}
+      className="w-40 bg-white border border-gray-200 rounded-lg shadow-lg"
+    >
+      {children}
+    </div>,
+    document.body,
+  );
 }
 
 interface Platform {
@@ -136,12 +159,19 @@ export function EditorApp() {
   >(new Map());
   const [currentSyncId, setCurrentSyncId] = useState<string | null>(null);
   const currentSyncIdRef = useRef<string | null>(null);
+  const [showImageMenu, setShowImageMenu] = useState<boolean>(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [imageMenuPos, setImageMenuPos] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
 
   const [debouncedArticle] = useDebounce(article, 1000);
 
   const mdContentRef = useRef<HTMLTextAreaElement>(null);
   const richContentRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  const imageMenuRef = useRef<HTMLDivElement>(null);
 
   // Markdown模式下插入格式
   const insertMarkdownFormat = (prefix: string, suffix: string) => {
@@ -297,7 +327,47 @@ export function EditorApp() {
     textarea.setSelectionRange(start + 5, start + 5);
   };
 
-  // 统一插入链接函数
+  // Markdown模式下插入代码块
+  const insertMarkdownCode = () => {
+    if (!mdContentRef.current) return;
+    const textarea = mdContentRef.current;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selectedText = textarea.value.substring(start, end);
+
+    // 获取语言输入
+    const language = prompt("输入代码语言（可选）:") || "";
+    const languagePrefix = language ? `${language}\n` : "";
+
+    const codeBlock = "```" + (language ? " " + language : "") + "\n";
+    const newValue =
+      textarea.value.substring(0, start) +
+      codeBlock +
+      selectedText +
+      "\n```\n" +
+      textarea.value.substring(end);
+    textarea.value = newValue;
+    updateArticle("content", newValue);
+    textarea.focus();
+    textarea.setSelectionRange(
+      start + codeBlock.length,
+      end + codeBlock.length + selectedText.length,
+    );
+  };
+
+  const toggleMenu = () => {
+    if (!buttonRef.current) return;
+
+    const rect = buttonRef.current.getBoundingClientRect();
+
+    setImageMenuPos({
+      top: rect.bottom + 4,
+      left: rect.left,
+    });
+
+    setShowImageMenu((prev) => !prev);
+  };
+
   const insertLink = () => {
     // MD 模式且处于编辑模式
     if (isMDMode && editorMode === "edit") {
@@ -336,8 +406,9 @@ export function EditorApp() {
       }
     }
   };
-  // 插入图片到富文本
-  const insertImage = () => {
+  // 通过URL插入图片
+  const insertImageByUrl = () => {
+    setShowImageMenu(false);
     if (isMDMode && editorMode === "edit") {
       if (!mdContentRef.current) return;
       const textarea = mdContentRef.current;
@@ -371,9 +442,71 @@ export function EditorApp() {
       const url = prompt("输入图片URL:");
       if (url) {
         // 使用 TipTap 命令插入图片
-        tiptapEditor.commands.insertContent(`<img src="${url}" alt="图片" />`);
+        tiptapEditor.commands
+          .insertContent(`<img src="${url}" alt="图片" />`)
+          .then(() => {
+            // 更新 article.content
+            updateArticle("content", tiptapEditor.getHTML());
+          });
       }
     }
+  };
+
+  // 上传图片
+  const uploadImage = () => {
+    setShowImageMenu(false);
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataUrl = reader.result as string;
+        if (isMDMode && editorMode === "edit") {
+          if (!mdContentRef.current) return;
+          const textarea = mdContentRef.current;
+          const start = textarea.selectionStart;
+          const end = textarea.selectionEnd;
+          const selectedText = textarea.value.substring(start, end);
+          const newValue =
+            textarea.value.substring(0, start) +
+            "![" +
+            (selectedText || "图片") +
+            "](" +
+            dataUrl +
+            ")" +
+            textarea.value.substring(end);
+          textarea.value = newValue;
+          updateArticle("content", newValue);
+          textarea.focus();
+          const newCursorPos =
+            start +
+            2 +
+            (selectedText ? selectedText.length + 3 : 3) +
+            dataUrl.length +
+            2;
+          textarea.setSelectionRange(newCursorPos, newCursorPos);
+        } else if (!isMDMode && tiptapEditor) {
+          // 富文本模式 - 使用 TipTap API
+          tiptapEditor.commands.focus();
+          const success = tiptapEditor.commands.setImage({
+            src: dataUrl,
+            alt: "图片",
+          });
+          if (success) {
+            // 同步更新 article.content
+            updateArticle("content", tiptapEditor.getHTML());
+          } else {
+            console.error("setImage 命令失败");
+          }
+        }
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
   };
 
   const updateArticle = useCallback(
@@ -442,6 +575,22 @@ export function EditorApp() {
     return <div dangerouslySetInnerHTML={{ __html: html }} />;
   }, []);
 
+  // 点击外部关闭菜单
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        imageMenuRef.current &&
+        !imageMenuRef.current.contains(event.target as Node)
+      ) {
+        setShowImageMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
   //自动保存到本地
   useEffect(() => {
     if (debouncedArticle) {
@@ -461,11 +610,6 @@ export function EditorApp() {
   //refs 用于获取输入框的值
   const titleRef = useRef<HTMLHeadingElement>(null);
   const authorRef = useRef<HTMLInputElement>(null);
-  const summaryRef = useRef<HTMLTextAreaElement>(null);
-  const tagsRef = useRef<HTMLInputElement>(null);
-  const categoryRef = useRef<HTMLSelectElement>(null);
-  const articleTypeRef = useRef<HTMLSelectElement>(null);
-  const publishDateRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 接收来自父窗口的消息
@@ -1180,7 +1324,13 @@ export function EditorApp() {
             onClick={() =>
               isMDMode
                 ? insertMarkdownIndent(true)
-                : tiptapEditor?.commands.indent()
+                : tiptapEditor
+                    ?.chain()
+                    .focus()
+                    .updateAttributes("paragraph", {
+                      style: "margin-left: 2em",
+                    })
+                    .run()
             }
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="增加缩进"
@@ -1191,7 +1341,11 @@ export function EditorApp() {
             onClick={() =>
               isMDMode
                 ? insertMarkdownIndent(false)
-                : tiptapEditor?.commands.outdent()
+                : tiptapEditor
+                    ?.chain()
+                    .focus()
+                    .updateAttributes("paragraph", { style: "margin-left: 0" })
+                    .run()
             }
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="减少缩进"
@@ -1209,17 +1363,45 @@ export function EditorApp() {
             <Link className="w-4 h-4" />
           </button>
           <button
-            onClick={() => insertImage()}
+            ref={buttonRef}
+            onClick={toggleMenu}
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="插入图片"
           >
             <Image className="w-4 h-4" />
           </button>
+          {showImageMenu && imageMenuPos && (
+            <Dropdown position={imageMenuPos}>
+              <button
+                onClick={insertImageByUrl}
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+              >
+                添加图片链接
+              </button>
+              <button
+                onClick={uploadImage}
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+              >
+                上传图片
+              </button>
+            </Dropdown>
+          )}
+          <button
+            onClick={() =>
+              isMDMode
+                ? insertMarkdownCode()
+                : tiptapEditor?.commands.setCodeBlock()
+            }
+            className="p-1.5 rounded hover:bg-gray-200 text-sm"
+            title="代码框"
+          >
+            &lt;/&gt;
+          </button>
           <button
             onClick={() =>
               isMDMode
                 ? insertMarkdownHorizontalRule()
-                : tiptapEditor?.commands.insertHorizontalRule()
+                : tiptapEditor?.commands.insertContent("<hr />")
             }
             className="p-1.5 rounded hover:bg-gray-200 text-sm"
             title="分隔线"
@@ -1306,18 +1488,22 @@ export function EditorApp() {
                     value={article.content}
                     onChange={(e) => updateArticle("content", e.target.value)}
                     placeholder="请在这里编写文章内容（支持Markdown语法）..."
-                    className="w-full outline-none font-sans text-base bg-white resize-y"
+                    className="w-full outline-none font-sans text-base bg-white p-4"
                     style={{
                       lineHeight: 1.8,
-                      minHeight: "800px",
+                      minHeight: "900px",
                       color: "#333",
                       fontSize: "16px",
+                      fontFamily:
+                        "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif",
+                      resize: "vertical",
+                      overflow: "auto",
                     }}
                   />
                 ) : (
                   <div
                     ref={previewRef}
-                    className="prose max-w-none min-h-[800px] bg-white prose-headings:font-bold prose-h1:text-4xl prose-h2:text-3xl prose-h3:text-2xl prose-h4:text-1xl prose-h5:text-1 prose-h6:text-1"
+                    className="prose max-w-none min-h-[800px] bg-white prose-headings:font-bold prose-h1:text-4xl prose-h2:text-3xl prose-h3:text-2xl prose-h4:text-1xl prose-h5:text-1 prose-h6:text-1 p-4"
                     style={{
                       lineHeight: 1.8,
                       fontSize: "16px",
