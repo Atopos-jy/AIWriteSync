@@ -757,65 +757,15 @@ export function EditorApp() {
     // 通知父窗口已准备好
     window.parent.postMessage(JSON.stringify({ type: "EDITOR_READY" }), "*");
 
-    // 独立模式：获取平台数据
-    const fetchPlatforms = async () => {
-      try {
-        // 首先尝试从 local storage 读取登录缓存和平台数据
-        console.log("fetchPlatforms: 开始获取平台数据");
-        const storageResult = await chrome.storage.local.get([
-          "authCache",
-          "platforms",
-        ]);
-
-        // 如果有缓存的平台数据，结合登录状态使用
-        if (storageResult.platforms && Array.isArray(storageResult.platforms)) {
-          const platforms = storageResult.platforms;
-          const authCache = storageResult.authCache || {};
-
-          // 将平台数据与登录状态结合
-          const platformsWithAuth = mergePlatformsWithAuth(
-            platforms,
-            authCache,
-          );
-
-          setPlatforms(platformsWithAuth);
-
-          // 自动勾选已登录平台
-          console.log("fetchPlatforms: 使用缓存 platforms", platformsWithAuth);
-          const authenticated = getAuthenticatedPlatforms(platformsWithAuth);
-          const authenticatedIds = authenticated.map((p: Platform) => p.id);
-          setSelectedPlatforms(new Set(authenticatedIds));
-          saveSelectedPlatforms(authenticatedIds);
-          logger.info("Loaded platforms from local storage with auth status");
-          return;
-        }
-
-        // 如果只有登录缓存，没有平台数据，构建平台数据
-        if (storageResult.authCache) {
-          const authCache = storageResult.authCache;
-          // 这里需要知道所有支持的平台列表
-          // 由于没有完整的平台元数据，我们只能基于登录状态构建
-          logger.info("Found authCache but no platforms data");
-        }
-
-        // 如果没有缓存数据，保持初始状态
-        // 不调用后台API，避免独立页面无法正常通信的问题
-        logger.info("No platforms data in storage, keeping initial state");
-      } catch (error) {
-        logger.error("Failed to fetch platforms:", error);
-      }
-    };
-
     // 尝试加载草稿
     loadDraft();
 
     // 检测是否有父页面
     const hasParentPage = window.parent !== window;
 
-    // 只有在没有父页面时才获取平台数据
+    // 不再支持独立模式获取平台数据
     if (!hasParentPage) {
-      logger.info("独立模式：直接获取平台数据");
-      fetchPlatforms();
+      logger.info("独立模式：平台数据将由父页面提供");
     } else {
       logger.info("有父页面模式：等待父页面发送数据");
     }
