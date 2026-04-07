@@ -58,6 +58,11 @@ export class ZhihuAdapter extends CodeAdapter {
       headers: { "x-requested-with": "fetch" },
       resourceTypes: ["xmlhttprequest"],
     },
+    {
+      urlFilter: "*://118.89.204.198/resolv*",
+      headers: { "x-requested-with": "fetch" },
+      resourceTypes: ["xmlhttprequest"],
+    },
   ];
 
   async checkAuth(): Promise<AuthResult> {
