@@ -9,10 +9,15 @@ export interface Article {
   title: string
   markdown: string    // Markdown 格式内容（主要）
   html?: string       // 原始 HTML（可选，用于某些需要 HTML 的平台）
+  content?: string    // 通用内容字段（兼容编辑器）
   summary?: string
   cover?: string
+  author?: string
   tags?: string[]
   category?: string
+  articleType?: string
+  publishDate?: string
+  url?: string
   source?: {
     url: string
     platform: string

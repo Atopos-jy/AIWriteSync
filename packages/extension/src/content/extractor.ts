@@ -3,7 +3,7 @@
  * 从当前页面提取文章内容
  *
  * 提取策略:
- * 1. 特定平台提取器 (微信公众号等)
+ * 1. 平台适配器提取 (优先，精准提取)
  * 2. Safari ReaderArticleFinder (通用，效果最佳)
  * 3. Mozilla Readability (通用，作为回退)
  * 4. <article> 标签 (最后手段)
@@ -13,84 +13,192 @@
  * - Service Worker 只需处理 Markdown，无需 DOM 解析
  */
 
-import { extractArticle as extractWithReader, ReaderResult } from '../lib/reader'
-import { htmlToMarkdownNative, type PreprocessConfig } from '@wechatsync/core'
-import { createLogger } from '../lib/logger'
-import { preprocessContentDOM, preprocessForPlatform, backupAndSimplifyCodeBlocks, restoreCodeBlocks, type PreprocessResult } from '../lib/content-processor'
+import {
+  extractArticle as extractWithReader,
+  ReaderResult,
+} from "../lib/reader";
+import { htmlToMarkdownNative, type PreprocessConfig } from "@wechatsync/core";
+import { createLogger } from "../lib/logger";
+import {
+  preprocessContentDOM,
+  preprocessForPlatform,
+  backupAndSimplifyCodeBlocks,
+  restoreCodeBlocks,
+  type PreprocessResult,
+} from "../lib/content-processor";
+import { matchCurrentPlatform } from "@wechatsync/core";
+import { initAdapters } from "../adapters";
 
-const logger = createLogger('Extractor')
+const logger = createLogger("Extractor");
 
 interface ExtractedArticle {
-  title: string
-  markdown: string   // Markdown 格式（主要）
-  html?: string      // 原始 HTML（可选，用于某些平台）
-  summary?: string
-  cover?: string
+  title: string;
+  author?: string;
+  articleType?: string;
+  markdown: string; // Markdown 格式（主要）
+  html?: string; // 原始 HTML（可选，用于某些平台）
+  summary?: string;
+  cover?: string;
+  tags?: string[];
+  category?: string;
+  content?: string;
+  url?: string;
+  publishedDate?: string;
   source: {
-    url: string
-    platform: string
-  }
+    url: string;
+    platform: string;
+  };
 }
 
 /**
  * 提取文章内容
  */
-function extractArticle(): ExtractedArticle | null {
-  const url = window.location.href
+async function extractArticle(): Promise<ExtractedArticle | null> {
+  // 2. 微信公众号专用提取（如果平台适配器失败）
+  const url = window.location.href;
+  if (url.includes("mp.weixin.qq.com")) {
+    logger.info("[提取验证] 使用微信公众号专用提取器");
+    console.log("[提取验证] 使用微信公众号专用提取器");
+    return extractWeixinArticle();
+  }
+  try {
+    // 初始化适配器
+    await initAdapters();
 
-  // 微信公众号
-  if (url.includes('mp.weixin.qq.com')) {
-    return extractWeixinArticle()
+    // 1. 平台适配器提取（优先）
+    const platformAdapter = await matchCurrentPlatform();
+    if (platformAdapter && typeof platformAdapter.extract === "function") {
+      logger.info(
+        `[提取验证] 使用平台专用提取器: ${platformAdapter.meta.name} (${platformAdapter.meta.id})`,
+      );
+      console.log(
+        `[提取验证] 使用平台专用提取器: ${platformAdapter.meta.name} (${platformAdapter.meta.id})`,
+      );
+      const extractResult = platformAdapter.extract();
+      if (extractResult && extractResult.title && extractResult.content) {
+        // 克隆内容元素进行处理
+        const clonedContent = extractResult.content.cloneNode(
+          true,
+        ) as HTMLElement;
+
+        // 预处理克隆的内容
+        preprocessContentDOM(clonedContent);
+
+        // 获取 HTML 并转换为 Markdown
+        const html = clonedContent.innerHTML;
+        const markdown = htmlToMarkdownNative(html);
+
+        return {
+          title: extractResult.title,
+          markdown,
+          html,
+          summary: extractResult.excerpt,
+          cover: extractResult.leadingImage,
+          tags: [],
+          category: undefined,
+          publishedDate: undefined,
+          source: {
+            url: window.location.href,
+            platform: extractResult.extractor || platformAdapter.meta.id,
+          },
+        };
+      }
+    }
+  } catch (error) {
+    logger.error("Platform adapter extraction failed:", error);
   }
 
-  // 通用提取 (使用 Safari Reader / Readability)
-  return extractGenericArticle()
+  // 3. 通用提取 (使用 Safari Reader / Readability)
+  logger.info("[提取验证] 使用通用提取方法");
+  console.log("[提取验证] 使用通用提取方法");
+  return extractGenericArticle();
 }
 
 /**
  * 提取微信公众号文章
  */
 function extractWeixinArticle(): ExtractedArticle | null {
-  const title = document.querySelector('#activity-name')?.textContent?.trim()
-  const contentEl = document.querySelector('#js_content')
-  const cover = document.querySelector('meta[property="og:image"]')?.getAttribute('content')
-  const summary = document.querySelector('meta[property="og:description"]')?.getAttribute('content')
+  const title = document.querySelector("#activity-name")?.textContent?.trim();
+  const contentEl = document.querySelector("#js_content");
+  const cover = document
+    .querySelector('meta[property="og:image"]')
+    ?.getAttribute("content");
+  const summary = document
+    .querySelector('meta[property="og:description"]')
+    ?.getAttribute("content");
+  // 提取作者信息：尝试多种选择器
+  const author =
+    document.querySelector(".rich_media_meta_link")?.textContent?.trim() ||
+    document.querySelector("#js_author_name")?.textContent?.trim() ||
+    document
+      .querySelector(".rich_media_meta .rich_media_meta_text")
+      ?.textContent?.trim();
+
+  // 文章类型（原创/转载）
+  let articleType = "";
+
+  // 方法1：查找原创标签元素（微信公众号原创标记）
+  const originalTag = Array.from(
+    document.querySelectorAll(".rich_media_meta"),
+  ).find(
+    (el) =>
+      el.textContent?.toLowerCase().includes("original") ||
+      el.textContent?.includes("原创"),
+  );
+
+  // 方法2：查找阅读原文链接
+  const readMoreLink = Array.from(document.querySelectorAll("a")).find(
+    (el) =>
+      el.textContent?.includes("阅读原文") ||
+      el.textContent?.toLowerCase().includes("read more"),
+  );
+
+  if (originalTag) {
+    articleType = "original";
+  } else if (readMoreLink) {
+    articleType = "reprint";
+  }
 
   if (!title || !contentEl) {
-    return null
+    return null;
   }
 
   // 在原始 DOM 上简化代码块（innerText 只在真实 DOM 上正确工作）
-  const codeBlockBackups = backupAndSimplifyCodeBlocks(contentEl)
+  const codeBlockBackups = backupAndSimplifyCodeBlocks(contentEl);
 
   try {
     // 克隆内容元素（此时代码块已经是简化后的纯文本）
-    const clonedContent = contentEl.cloneNode(true) as HTMLElement
+    const clonedContent = contentEl.cloneNode(true) as HTMLElement;
 
     // 恢复原始 DOM（尽早恢复，避免影响页面显示）
-    restoreCodeBlocks(codeBlockBackups)
+    restoreCodeBlocks(codeBlockBackups);
 
     // 预处理克隆的内容
-    preprocessContentDOM(clonedContent)
+    preprocessContentDOM(clonedContent);
 
     // 获取 HTML 并转换为 Markdown
-    const html = clonedContent.innerHTML
-    const markdown = htmlToMarkdownNative(html)
+    const html = clonedContent.innerHTML;
+    const markdown = htmlToMarkdownNative(html);
 
     return {
       title,
+      author: author || undefined,
+      articleType: articleType || undefined,
       markdown,
+      tags: [],
+      category: undefined,
+      publishedDate: undefined,
       html, // 保留原始 HTML，微信平台需要
       summary: summary || undefined,
       cover: cover || undefined,
       source: {
         url: window.location.href,
-        platform: 'weixin',
+        platform: "weixin",
       },
-    }
+    };
   } catch (e) {
-    restoreCodeBlocks(codeBlockBackups)
-    throw e
+    restoreCodeBlocks(codeBlockBackups);
+    throw e;
   }
 }
 
@@ -100,14 +208,14 @@ function extractWeixinArticle(): ExtractedArticle | null {
  */
 function extractGenericArticle(): ExtractedArticle | null {
   // 使用统一的 Reader 提取器
-  const result = extractWithReader()
+  const result = extractWithReader();
 
   if (result) {
-    return readerResultToArticle(result)
+    return readerResultToArticle(result);
   }
 
   // 如果 Reader 提取失败，尝试简单的选择器
-  return extractWithSelectors()
+  return extractWithSelectors();
 }
 
 /**
@@ -115,25 +223,28 @@ function extractGenericArticle(): ExtractedArticle | null {
  */
 function readerResultToArticle(result: ReaderResult): ExtractedArticle {
   // 创建临时 DOM 进行预处理
-  const tempDiv = document.createElement('div')
-  tempDiv.innerHTML = result.content
-  preprocessContentDOM(tempDiv)
-  const processedHtml = tempDiv.innerHTML
+  const tempDiv = document.createElement("div");
+  tempDiv.innerHTML = result.content;
+  preprocessContentDOM(tempDiv);
+  const processedHtml = tempDiv.innerHTML;
 
   // 转换为 Markdown
-  const markdown = htmlToMarkdownNative(processedHtml)
+  const markdown = htmlToMarkdownNative(processedHtml);
 
   return {
     title: result.title,
     markdown,
     html: processedHtml, // 预处理后的 HTML
     summary: result.excerpt,
+    tags: [],
+    category: undefined,
+    publishedDate: undefined,
     cover: result.leadingImage || result.mainImage,
     source: {
       url: window.location.href,
       platform: result.extractor,
     },
-  }
+  };
 }
 
 /**
@@ -143,70 +254,76 @@ function extractWithSelectors(): ExtractedArticle | null {
   // 尝试常见的文章选择器
   const selectors = {
     title: [
-      'h1',
-      'article h1',
-      '.article-title',
-      '.post-title',
+      "h1",
+      "article h1",
+      ".article-title",
+      ".post-title",
       '[itemprop="headline"]',
     ],
     content: [
-      'article',
-      '.article-content',
-      '.post-content',
-      '.entry-content',
+      "article",
+      ".article-content",
+      ".post-content",
+      ".entry-content",
       '[itemprop="articleBody"]',
-      'main',
+      "main",
     ],
-  }
+  };
 
-  let title: string | null = null
+  let title: string | null = null;
   for (const selector of selectors.title) {
-    const el = document.querySelector(selector)
+    const el = document.querySelector(selector);
     if (el?.textContent?.trim()) {
-      title = el.textContent.trim()
-      break
+      title = el.textContent.trim();
+      break;
     }
   }
 
-  let html: string | null = null
+  let html: string | null = null;
   for (const selector of selectors.content) {
-    const el = document.querySelector(selector)
+    const el = document.querySelector(selector);
     if (el?.innerHTML) {
       // 在原始 DOM 上简化代码块
-      const codeBlockBackups = backupAndSimplifyCodeBlocks(el)
+      const codeBlockBackups = backupAndSimplifyCodeBlocks(el);
 
       try {
         // 克隆并预处理
-        const clonedContent = el.cloneNode(true) as HTMLElement
+        const clonedContent = el.cloneNode(true) as HTMLElement;
 
         // 恢复原始 DOM
-        restoreCodeBlocks(codeBlockBackups)
+        restoreCodeBlocks(codeBlockBackups);
 
-        preprocessContentDOM(clonedContent)
-        html = clonedContent.innerHTML
-        break
+        preprocessContentDOM(clonedContent);
+        html = clonedContent.innerHTML;
+        break;
       } catch (e) {
-        restoreCodeBlocks(codeBlockBackups)
-        throw e
+        restoreCodeBlocks(codeBlockBackups);
+        throw e;
       }
     }
   }
 
   // 回退到 meta 标签
   if (!title) {
-    title = document.querySelector('meta[property="og:title"]')?.getAttribute('content')
-      || document.title
+    title =
+      document
+        .querySelector('meta[property="og:title"]')
+        ?.getAttribute("content") || document.title;
   }
 
   if (!title || !html) {
-    return null
+    return null;
   }
 
   // 转换为 Markdown
-  const markdown = htmlToMarkdownNative(html)
+  const markdown = htmlToMarkdownNative(html);
 
-  const cover = document.querySelector('meta[property="og:image"]')?.getAttribute('content')
-  const summary = document.querySelector('meta[property="og:description"]')?.getAttribute('content')
+  const cover = document
+    .querySelector('meta[property="og:image"]')
+    ?.getAttribute("content");
+  const summary = document
+    .querySelector('meta[property="og:description"]')
+    ?.getAttribute("content");
 
   return {
     title,
@@ -214,25 +331,28 @@ function extractWithSelectors(): ExtractedArticle | null {
     html, // 保留原始 HTML
     summary: summary || undefined,
     cover: cover || undefined,
+    tags: [],
+    category: undefined,
+    publishedDate: undefined,
     source: {
       url: window.location.href,
-      platform: 'selector',
+      platform: "selector",
     },
-  }
+  };
 }
 
 // ========== 悬浮按钮 ==========
 
-let floatingButton: HTMLDivElement | null = null
+let floatingButton: HTMLDivElement | null = null;
 
 function injectFloatingButton() {
-  if (floatingButton) return
+  if (floatingButton) return;
   // 微信公众号页面已有专属悬浮按钮，不重复注入
-  if (window.location.hostname === 'mp.weixin.qq.com') return
+  if (window.location.hostname === "mp.weixin.qq.com") return;
 
-  const btn = document.createElement('div')
-  btn.id = 'wechatsync-floating-btn'
-  btn.title = '同步文章'
+  const btn = document.createElement("div");
+  btn.id = "wechatsync-floating-btn";
+  btn.title = "同步文章";
   btn.style.cssText = `
     position: fixed !important;
     right: 24px !important;
@@ -254,73 +374,77 @@ function injectFloatingButton() {
     font-weight: 500 !important;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
     border: none !important;
-  `
+  `;
   btn.innerHTML = `
     <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
       <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
     </svg>
     <span style="color:white;font-size:14px;font-weight:500;">同步</span>
-  `
+  `;
 
-  btn.addEventListener('mouseenter', () => {
-    btn.style.transform = 'scale(1.05)'
-    btn.style.boxShadow = '0 6px 20px rgba(7, 193, 96, 0.45)'
-  })
-  btn.addEventListener('mouseleave', () => {
-    btn.style.transform = 'scale(1)'
-    btn.style.boxShadow = '0 4px 12px rgba(7, 193, 96, 0.35)'
-  })
-  btn.addEventListener('click', () => {
-    chrome.runtime.sendMessage({ type: 'TRIGGER_OPEN_EDITOR' })
-  })
+  btn.addEventListener("mouseenter", () => {
+    btn.style.transform = "scale(1.05)";
+    btn.style.boxShadow = "0 6px 20px rgba(7, 193, 96, 0.45)";
+  });
+  btn.addEventListener("mouseleave", () => {
+    btn.style.transform = "scale(1)";
+    btn.style.boxShadow = "0 4px 12px rgba(7, 193, 96, 0.35)";
+  });
+  btn.addEventListener("click", () => {
+    chrome.runtime.sendMessage({ type: "TRIGGER_OPEN_EDITOR" });
+  });
 
-  document.body.appendChild(btn)
-  floatingButton = btn
+  document.body.appendChild(btn);
+  floatingButton = btn;
 }
 
 function removeFloatingButton() {
   if (floatingButton) {
-    floatingButton.remove()
-    floatingButton = null
+    floatingButton.remove();
+    floatingButton = null;
   }
 }
 
 // 初始化：读取设置决定是否注入
-chrome.storage.local.get('floatingButtonEnabled', (result) => {
+chrome.storage.local.get("floatingButtonEnabled", (result) => {
   if (result.floatingButtonEnabled) {
-    injectFloatingButton()
+    injectFloatingButton();
   }
-})
+});
 
 // 监听设置变化，实时响应
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.floatingButtonEnabled) {
     if (changes.floatingButtonEnabled.newValue) {
-      injectFloatingButton()
+      injectFloatingButton();
     } else {
-      removeFloatingButton()
+      removeFloatingButton();
     }
   }
-})
+});
 
 // ========== 编辑器注入 ==========
 
-let editorIframe: HTMLIFrameElement | null = null
-let editorContainer: HTMLDivElement | null = null
+let editorIframe: HTMLIFrameElement | null = null;
+let editorContainer: HTMLDivElement | null = null;
 
 /**
  * 打开编辑器
  */
-function openEditor(article: ExtractedArticle, platforms: any[], selectedPlatformIds?: string[]) {
+function openEditor(
+  article: ExtractedArticle,
+  platforms: any[],
+  selectedPlatformIds?: string[],
+) {
   if (editorContainer) {
     // 已经打开，重新发送数据
-    sendDataToEditor(article, platforms, selectedPlatformIds)
-    return
+    sendDataToEditor(article, platforms, selectedPlatformIds);
+    return;
   }
 
   // 创建全屏容器
-  editorContainer = document.createElement('div')
-  editorContainer.id = 'wechatsync-editor-container'
+  editorContainer = document.createElement("div");
+  editorContainer.id = "wechatsync-editor-container";
   editorContainer.style.cssText = `
     position: fixed !important;
     top: 0 !important;
@@ -331,11 +455,11 @@ function openEditor(article: ExtractedArticle, platforms: any[], selectedPlatfor
     background: white !important;
     margin: 0 !important;
     padding: 0 !important;
-  `
+  `;
 
   // 创建 iframe
-  editorIframe = document.createElement('iframe')
-  editorIframe.src = chrome.runtime.getURL('src/editor/index.html')
+  editorIframe = document.createElement("iframe");
+  editorIframe.src = chrome.runtime.getURL("src/editor/index.html");
   editorIframe.style.cssText = `
     width: 100vw !important;
     height: 100vh !important;
@@ -343,52 +467,72 @@ function openEditor(article: ExtractedArticle, platforms: any[], selectedPlatfor
     margin: 0 !important;
     padding: 0 !important;
     display: block !important;
-  `
+  `;
 
-  editorContainer.appendChild(editorIframe)
-  document.body.appendChild(editorContainer)
+  editorContainer.appendChild(editorIframe);
+  document.body.appendChild(editorContainer);
 
   // 禁止页面滚动
-  document.body.style.overflow = 'hidden'
+  document.body.style.overflow = "hidden";
 
   // 等待 iframe 准备好后发送数据
   const handleEditorReady = (event: MessageEvent) => {
     try {
-      const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
-      if (data.type === 'EDITOR_READY') {
-        sendDataToEditor(article, platforms, selectedPlatformIds)
-        window.removeEventListener('message', handleEditorReady)
+      const data =
+        typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+      if (data.type === "EDITOR_READY") {
+        sendDataToEditor(article, platforms, selectedPlatformIds);
+        window.removeEventListener("message", handleEditorReady);
       }
     } catch (e) {
       // ignore
     }
-  }
-  window.addEventListener('message', handleEditorReady)
+  };
+  window.addEventListener("message", handleEditorReady);
 }
 
 /**
  * 发送数据到编辑器
  */
-function sendDataToEditor(article: ExtractedArticle, platforms: any[], selectedPlatformIds?: string[]) {
-  if (!editorIframe?.contentWindow) return
+function sendDataToEditor(
+  article: ExtractedArticle,
+  platforms: any[],
+  selectedPlatformIds?: string[],
+) {
+  if (!editorIframe?.contentWindow) return;
 
+  console.log("[Extractor] Extracted article:", article);
   // 发送文章数据
-  editorIframe.contentWindow.postMessage(JSON.stringify({
-    type: 'ARTICLE_DATA',
-    article: {
-      title: article.title,
-      content: article.html || article.markdown,
-      cover: article.cover,
-      url: article.source.url,
-    },
-  }), '*')
+  editorIframe.contentWindow.postMessage(
+    JSON.stringify({
+      type: "ARTICLE_DATA",
+      article: {
+        title: article.title,
+        author: article.author,
+        summary: article.summary,
+        url: article.source.url,
+        tags: article.tags,
+        html: article.html,
+        markdown: article.markdown,
+        category: article.category,
+        publishedDate: article.publishedDate,
+        content: article.html || article.markdown,
+        cover: article.cover,
+        articleType: article.articleType,
+      },
+    }),
+    "*",
+  );
 
   // 发送平台数据（包含已选中的平台）
-  editorIframe.contentWindow.postMessage(JSON.stringify({
-    type: 'PLATFORMS_DATA',
-    platforms,
-    selectedPlatformIds, // 传递已选中的平台 ID
-  }), '*')
+  editorIframe.contentWindow.postMessage(
+    JSON.stringify({
+      type: "PLATFORMS_DATA",
+      platforms,
+      selectedPlatformIds, // 传递已选中的平台 ID
+    }),
+    "*",
+  );
 }
 
 /**
@@ -396,10 +540,10 @@ function sendDataToEditor(article: ExtractedArticle, platforms: any[], selectedP
  */
 function closeEditor() {
   if (editorContainer) {
-    editorContainer.remove()
-    editorContainer = null
-    editorIframe = null
-    document.body.style.overflow = ''
+    editorContainer.remove();
+    editorContainer = null;
+    editorIframe = null;
+    document.body.style.overflow = "";
   }
 }
 
@@ -413,60 +557,81 @@ function closeEditor() {
 function preprocessForMultiplePlatformsLocal(
   rawHtml: string,
   platformIds: string[],
-  configs: Record<string, PreprocessConfig>
+  configs: Record<string, PreprocessConfig>,
 ): Record<string, PreprocessResult> {
-  const results: Record<string, PreprocessResult> = {}
+  const results: Record<string, PreprocessResult> = {};
 
   for (const platformId of platformIds) {
-    const config = configs[platformId]
+    const config = configs[platformId];
     if (config) {
-      results[platformId] = preprocessForPlatform(rawHtml, config)
+      results[platformId] = preprocessForPlatform(rawHtml, config);
     } else {
       // 没有配置的平台使用默认处理
-      const tempDiv = document.createElement('div')
-      tempDiv.innerHTML = rawHtml
-      preprocessContentDOM(tempDiv)
-      const html = tempDiv.innerHTML
+      const tempDiv = document.createElement("div");
+      tempDiv.innerHTML = rawHtml;
+      preprocessContentDOM(tempDiv);
+      const html = tempDiv.innerHTML;
       results[platformId] = {
         html,
         markdown: htmlToMarkdownNative(html),
-      }
+      };
     }
   }
 
-  return results
+  return results;
 }
 
 /**
  * 监听编辑器消息
  */
-window.addEventListener('message', async (event) => {
+window.addEventListener("message", async (event) => {
   try {
-    const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
+    // 尝试解析消息数据
+    let data;
+    try {
+      data =
+        typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+    } catch (parseError) {
+      // 忽略无法解析的消息（如头条的 "[tea-sdk]ready"）
+      return;
+    }
 
-    if (data.type === 'CLOSE_EDITOR') {
-      closeEditor()
-    } else if (data.type === 'START_SYNC') {
+    // 只处理我们关心的消息类型
+    if (!data || !data.type) {
+      return;
+    }
+
+    if (data.type === "CLOSE_EDITOR") {
+      closeEditor();
+    } else if (data.type === "START_SYNC") {
       // 转发同步请求到 background
       // 编辑器传来的是 HTML content
-      const rawHtml = data.article.content || ''
-      const platforms: string[] = data.platforms || []
+      const rawHtml = data.article.content || "";
+      const platforms: string[] = data.platforms || [];
 
       // 从 background 获取各平台的预处理配置
       const configResponse = await chrome.runtime.sendMessage({
-        type: 'GET_PREPROCESS_CONFIGS',
+        type: "GET_PREPROCESS_CONFIGS",
         platforms,
-      })
+      });
 
-      const configs: Record<string, PreprocessConfig> = configResponse?.configs || {}
+      const configs: Record<string, PreprocessConfig> =
+        configResponse?.configs || {};
 
       // 为每个平台分别预处理
-      const platformContents = preprocessForMultiplePlatformsLocal(rawHtml, platforms, configs)
+      const platformContents = preprocessForMultiplePlatformsLocal(
+        rawHtml,
+        platforms,
+        configs,
+      );
 
-      logger.debug('Preprocessed contents for platforms:', Object.keys(platformContents))
+      logger.debug(
+        "Preprocessed contents for platforms:",
+        Object.keys(platformContents),
+      );
 
       chrome.runtime.sendMessage({
-        type: 'START_SYNC_FROM_EDITOR',
+        type: "START_SYNC_FROM_EDITOR",
         article: {
           ...data.article,
           // 保留一份默认内容（兼容）
@@ -476,48 +641,72 @@ window.addEventListener('message', async (event) => {
           platformContents,
         },
         platforms,
-        syncId: data.syncId,  // 转发 syncId
-      })
+        syncId: data.syncId, // 转发 syncId
+      });
     }
   } catch (e) {
-    logger.error('Error handling editor message:', e)
+    logger.error("Error handling editor message:", e);
   }
-})
+});
 
 /**
  * 监听 background 消息，转发同步进度到编辑器
  */
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.type === 'EXTRACT_ARTICLE') {
-    const article = extractArticle()
-    sendResponse({ article })
-  } else if (message.type === 'OPEN_EDITOR') {
-    // 打开编辑器
-    const article = extractArticle()
-    if (article) {
-      // 传递平台列表和已选中的平台 ID
-      openEditor(article, message.platforms || [], message.selectedPlatforms || [])
-      sendResponse({ success: true })
-    } else {
-      sendResponse({ success: false, error: '无法提取文章内容' })
-    }
-  } else if (message.type === 'PREPROCESS_FOR_PLATFORMS') {
+  if (message.type === "EXTRACT_ARTICLE") {
+    extractArticle()
+      .then((article) => {
+        sendResponse({ article });
+      })
+      .catch((error) => {
+        logger.error("Extract article error:", error);
+        sendResponse({ article: null });
+      });
+    return true; // 保持端口开放，等待异步操作完成
+  } else if (message.type === "OPEN_EDITOR") {
+    extractArticle()
+      .then((article) => {
+        if (article) {
+          // 传递平台列表和已选中的平台 ID
+          openEditor(
+            article,
+            message.platforms || [],
+            message.selectedPlatforms || [],
+          );
+          sendResponse({ success: true });
+        } else {
+          sendResponse({ success: false, error: "无法提取文章内容" });
+        }
+      })
+      .catch((error) => {
+        logger.error("Open editor error:", error);
+        sendResponse({ success: false, error: "打开编辑器失败" });
+      });
+    return true; // 保持端口开放，等待异步操作完成
+  } else if (message.type === "PREPROCESS_FOR_PLATFORMS") {
     // 为多个平台预处理内容（由 background 调用）
     const { rawHtml, platforms, configs } = message.payload as {
-      rawHtml: string
-      platforms: string[]
-      configs: Record<string, PreprocessConfig>
-    }
-    const platformContents = preprocessForMultiplePlatformsLocal(rawHtml, platforms, configs)
-    sendResponse({ platformContents })
-  } else if (message.type === 'SYNC_PROGRESS') {
+      rawHtml: string;
+      platforms: string[];
+      configs: Record<string, PreprocessConfig>;
+    };
+    const platformContents = preprocessForMultiplePlatformsLocal(
+      rawHtml,
+      platforms,
+      configs,
+    );
+    sendResponse({ platformContents });
+  } else if (message.type === "SYNC_PROGRESS") {
     // 转发同步进度到编辑器（带上 syncId）
-    editorIframe?.contentWindow?.postMessage(JSON.stringify({
-      type: 'SYNC_PROGRESS',
-      result: message.result,
-      syncId: message.syncId,
-    }), '*')
-  } else if (message.type === 'SYNC_DETAIL_PROGRESS') {
+    editorIframe?.contentWindow?.postMessage(
+      JSON.stringify({
+        type: "SYNC_PROGRESS",
+        result: message.result,
+        syncId: message.syncId,
+      }),
+      "*",
+    );
+  } else if (message.type === "SYNC_DETAIL_PROGRESS") {
     // 转发详细进度到编辑器（带上 syncId）
     // 兼容两种格式：message.payload (from SYNC_ARTICLE) 或直接展开 (from START_SYNC_FROM_EDITOR)
     const progress = message.payload || {
@@ -527,26 +716,35 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       imageProgress: message.imageProgress,
       result: message.result,
       error: message.error,
-    }
-    editorIframe?.contentWindow?.postMessage(JSON.stringify({
-      type: 'SYNC_DETAIL_PROGRESS',
-      progress,
-      syncId: message.syncId,
-    }), '*')
-  } else if (message.type === 'SYNC_COMPLETE') {
+    };
+    editorIframe?.contentWindow?.postMessage(
+      JSON.stringify({
+        type: "SYNC_DETAIL_PROGRESS",
+        progress,
+        syncId: message.syncId,
+      }),
+      "*",
+    );
+  } else if (message.type === "SYNC_COMPLETE") {
     // 同步完成（带上 syncId）
-    editorIframe?.contentWindow?.postMessage(JSON.stringify({
-      type: 'SYNC_COMPLETE',
-      rateLimitWarning: message.rateLimitWarning,
-      syncId: message.syncId,
-    }), '*')
-  } else if (message.type === 'SYNC_ERROR') {
+    editorIframe?.contentWindow?.postMessage(
+      JSON.stringify({
+        type: "SYNC_COMPLETE",
+        rateLimitWarning: message.rateLimitWarning,
+        syncId: message.syncId,
+      }),
+      "*",
+    );
+  } else if (message.type === "SYNC_ERROR") {
     // 同步错误（带上 syncId）
-    editorIframe?.contentWindow?.postMessage(JSON.stringify({
-      type: 'SYNC_ERROR',
-      error: message.error,
-      syncId: message.syncId,
-    }), '*')
+    editorIframe?.contentWindow?.postMessage(
+      JSON.stringify({
+        type: "SYNC_ERROR",
+        error: message.error,
+        syncId: message.syncId,
+      }),
+      "*",
+    );
   }
-  return true
-})
+  return true;
+});

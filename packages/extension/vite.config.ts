@@ -105,21 +105,21 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.PROD': JSON.stringify(!isDev),
       'import.meta.env.DEV': JSON.stringify(isDev),
     },
-  resolve: {
-    alias: {
-      '@': resolve(__dirname, 'src'),
-      '@wechatsync/core': resolve(__dirname, '../core/src'),
-    },
-  },
-  build: {
-    // 开发模式: 不压缩，生成 sourcemap
-    minify: isDev ? false : 'esbuild',
-    sourcemap: isDev ? 'inline' : false,
-    rollupOptions: {
-      input: {
-        popup: resolve(__dirname, 'src/popup/index.html'),
-        editor: resolve(__dirname, 'src/editor/index.html'),
+    resolve: {
+      alias: {
+        '@': resolve(__dirname, 'src'),
+        '@wechatsync/core': resolve(__dirname, '../core/src'),
       },
     },
-  },
+    build: {
+      // 开发模式: 不压缩，生成 sourcemap
+      minify: isDev ? false : 'esbuild',
+      sourcemap: isDev ? 'inline' : false,
+      rollupOptions: {
+        input: {
+          popup: resolve(__dirname, 'src/popup/index.html'),
+          editor: resolve(__dirname, 'src/editor/index.html'),
+        },
+      },
+    },
 }})

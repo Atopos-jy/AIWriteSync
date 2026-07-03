@@ -26,7 +26,9 @@
   ],
   "host_permissions": [
     "http://*/*",
-    "https://*/*"
+    "https://*/*",
+    "https://juejin.cn/*",
+    "https://api.juejin.cn/*"
   ],
   "background": {
     "service_worker": "src/background/index.ts",
@@ -40,7 +42,10 @@
       "all_frames": true
     },
     {
-      "matches": ["https://mp.weixin.qq.com/s/*", "https://mp.weixin.qq.com/s?*"],
+      "matches": [
+        "https://mp.weixin.qq.com/s/*",
+        "https://mp.weixin.qq.com/s?*"
+      ],
       "js": ["src/content/weixin.ts"],
       "run_at": "document_end"
     },
@@ -56,9 +61,7 @@
     },
     {
       "matches": ["http://*/*", "https://*/*"],
-      "js": [
-        "src/content/extractor.ts"
-      ],
+      "js": ["src/content/extractor.ts"],
       "run_at": "document_end"
     }
   ],

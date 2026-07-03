@@ -2,77 +2,88 @@
  * 微信公众号后台编辑器页面 Content Script
  * 在编辑页面提供同步面板（可拖动、可收起）
  */
-import { createLogger } from '../lib/logger'
-import { htmlToMarkdownNative } from '@wechatsync/core'
-import { preprocessContentString, backupAndSimplifyCodeBlocks, restoreCodeBlocks } from '../lib/content-processor'
+import { createLogger } from "../lib/logger";
+import { htmlToMarkdownNative } from "@wechatsync/core";
+import {
+  preprocessContentString,
+  backupAndSimplifyCodeBlocks,
+  restoreCodeBlocks,
+} from "../lib/content-processor";
 
-const logger = createLogger('WeixinEditor')
+const logger = createLogger("WeixinEditor");
 
-;(() => {
-interface Platform {
-  id: string
-  name: string
-  icon: string
-  isAuthenticated: boolean
-}
+(() => {
+  interface Platform {
+    id: string;
+    name: string;
+    icon: string;
+    isAuthenticated: boolean;
+  }
 
-interface SyncResult {
-  platform: string
-  success: boolean
-  postUrl?: string
-  error?: string
-}
+  interface SyncResult {
+    platform: string;
+    success: boolean;
+    postUrl?: string;
+    error?: string;
+  }
 
-// 同步阶段类型
-type SyncStage = 'starting' | 'uploading_images' | 'saving' | 'completed' | 'failed'
+  // 同步阶段类型
+  type SyncStage =
+    | "starting"
+    | "uploading_images"
+    | "saving"
+    | "completed"
+    | "failed";
 
-// 平台同步详细进度
-interface PlatformProgress {
-  platform: string
-  platformName: string
-  stage: SyncStage
-  imageProgress?: { current: number; total: number }
-  error?: string
-}
+  // 平台同步详细进度
+  interface PlatformProgress {
+    platform: string;
+    platformName: string;
+    stage: SyncStage;
+    imageProgress?: { current: number; total: number };
+    error?: string;
+  }
 
-type ViewState = 'loading' | 'platforms' | 'syncing' | 'results' | 'empty'
+  type ViewState = "loading" | "platforms" | "syncing" | "results" | "empty";
 
-interface State {
-  view: ViewState
-  platforms: Platform[]
-  selectedPlatforms: string[]
-  results: SyncResult[]
-  collapsed: boolean
-  platformProgress: Map<string, PlatformProgress>
-  currentSyncId: string | null
-}
+  interface State {
+    view: ViewState;
+    platforms: Platform[];
+    selectedPlatforms: string[];
+    results: SyncResult[];
+    collapsed: boolean;
+    platformProgress: Map<string, PlatformProgress>;
+    currentSyncId: string | null;
+  }
 
-const state: State = {
-  view: 'loading',
-  platforms: [],
-  selectedPlatforms: [],
-  results: [],
-  collapsed: true, // 默认收起
-  platformProgress: new Map(),
-  currentSyncId: null,
-}
+  const state: State = {
+    view: "loading",
+    platforms: [],
+    selectedPlatforms: [],
+    results: [],
+    collapsed: true, // 默认收起
+    platformProgress: new Map(),
+    currentSyncId: null,
+  };
 
-// 检查是否是编辑页面
-function isEditorPage(): boolean {
-  const url = window.location.href
-  return url.includes('mp.weixin.qq.com/cgi-bin/appmsg') &&
-         (url.includes('action=edit') || url.includes('appmsg_edit'))
-}
+  // 检查是否是编辑页面
+  function isEditorPage(): boolean {
+    const url = window.location.href;
+    return (
+      url.includes("mp.weixin.qq.com/cgi-bin/appmsg") &&
+      (url.includes("action=edit") || url.includes("appmsg_edit"))
+    );
+  }
 
-// 显示频率限制警告
-function showRateLimitWarning(message: string) {
-  // 移除已存在的警告
-  const existing = document.querySelector('#wechatsync-rate-warning')
-  if (existing) existing.remove()
+  // 显示频率限制警告
+  function showRateLimitWarning(message: string) {
+    // 移除已存在的警告
+    const existing = document.querySelector("#wechatsync-rate-warning");
+    if (existing) existing.remove();
 
-  const warning = document.createElement('div')
-  warning.id = 'wechatsync-rate-warning'
-  warning.innerHTML = `
+    const warning = document.createElement("div");
+    warning.id = "wechatsync-rate-warning";
+    warning.innerHTML = `
     <style>
       #wechatsync-rate-warning {
         position: fixed;
@@ -114,20 +125,20 @@ function showRateLimitWarning(message: string) {
     <span>⚠️</span>
     <span style="flex: 1;">${message}</span>
     <button class="close-btn" onclick="this.parentElement.remove()">×</button>
-  `
-  document.body.appendChild(warning)
+  `;
+    document.body.appendChild(warning);
 
-  // 8秒后自动关闭
-  setTimeout(() => warning.remove(), 8000)
-}
+    // 8秒后自动关闭
+    setTimeout(() => warning.remove(), 8000);
+  }
 
-// 注入同步面板
-async function injectSyncPanel() {
-  if (document.querySelector('#wechatsync-editor-panel')) return
+  // 注入同步面板
+  async function injectSyncPanel() {
+    if (document.querySelector("#wechatsync-editor-panel")) return;
 
-  const panel = document.createElement('div')
-  panel.id = 'wechatsync-editor-panel'
-  panel.innerHTML = `
+    const panel = document.createElement("div");
+    panel.id = "wechatsync-editor-panel";
+    panel.innerHTML = `
     <style>
       #wechatsync-editor-panel {
         position: fixed;
@@ -426,256 +437,270 @@ async function injectSyncPanel() {
         <a href="javascript:void(0)" id="ws-popup">完整面板</a>
       </div>
     </div>
-  `
+  `;
 
-  document.body.appendChild(panel)
-  bindEvents()
-  loadPlatforms()
-}
-
-function bindEvents() {
-  const fab = document.getElementById('ws-fab')!
-  const panel = document.getElementById('ws-panel')!
-  const header = document.getElementById('ws-header')!
-  const closeBtn = document.getElementById('ws-close')!
-  const historyLink = document.getElementById('ws-history')!
-  const popupLink = document.getElementById('ws-popup')!
-  const container = document.getElementById('wechatsync-editor-panel')!
-
-  // 展开面板
-  fab.addEventListener('click', () => {
-    state.collapsed = false
-    fab.classList.add('hidden')
-    panel.classList.add('visible')
-  })
-
-  // 收起面板
-  closeBtn.addEventListener('click', (e) => {
-    e.stopPropagation()
-    state.collapsed = true
-    fab.classList.remove('hidden')
-    panel.classList.remove('visible')
-  })
-
-  // 拖动面板
-  let isDragging = false
-  let startX = 0
-  let startY = 0
-  let startRight = 20
-  let startBottom = 80
-
-  header.addEventListener('mousedown', (e) => {
-    if ((e.target as HTMLElement).closest('.ws-close')) return
-    isDragging = true
-    startX = e.clientX
-    startY = e.clientY
-    const rect = container.getBoundingClientRect()
-    startRight = window.innerWidth - rect.right
-    startBottom = window.innerHeight - rect.bottom
-    e.preventDefault()
-  })
-
-  document.addEventListener('mousemove', (e) => {
-    if (!isDragging) return
-    const dx = startX - e.clientX
-    const dy = startY - e.clientY
-    const newRight = Math.max(0, Math.min(window.innerWidth - 280, startRight + dx))
-    const newBottom = Math.max(0, Math.min(window.innerHeight - 100, startBottom + dy))
-    container.style.right = newRight + 'px'
-    container.style.bottom = newBottom + 'px'
-  })
-
-  document.addEventListener('mouseup', () => {
-    isDragging = false
-  })
-
-  // 历史
-  historyLink.addEventListener('click', (e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    chrome.runtime.sendMessage({ type: 'OPEN_SYNC_PAGE', path: '/history' })
-  })
-
-  // 完整面板
-  popupLink.addEventListener('click', async (e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const article = await extractArticle()
-    if (article) {
-      await chrome.storage.local.set({ pendingArticle: article })
-    }
-    chrome.runtime.sendMessage({ type: 'OPEN_SYNC_PAGE' })
-  })
-}
-
-async function loadPlatforms() {
-  renderView('loading')
-
-  try {
-    // CHECK_ALL_AUTH 现在返回 DSL 和 CMS 合并的列表
-    const response = await chrome.runtime.sendMessage({ type: 'CHECK_ALL_AUTH' })
-    state.platforms = (response.platforms || []).filter((p: Platform) => p.isAuthenticated)
-
-    const storage = await chrome.storage.local.get('lastSelectedPlatforms')
-    state.selectedPlatforms = storage.lastSelectedPlatforms || []
-
-    if (state.platforms.length === 0) {
-      renderView('empty')
-    } else {
-      renderView('platforms')
-    }
-  } catch (error) {
-    logger.error('Failed to load platforms:', error)
-    renderView('empty')
+    document.body.appendChild(panel);
+    bindEvents();
+    loadPlatforms();
   }
-}
 
-function renderView(view: ViewState) {
-  state.view = view
-  const content = document.getElementById('ws-content')!
+  function bindEvents() {
+    const fab = document.getElementById("ws-fab")!;
+    const panel = document.getElementById("ws-panel")!;
+    const header = document.getElementById("ws-header")!;
+    const closeBtn = document.getElementById("ws-close")!;
+    const historyLink = document.getElementById("ws-history")!;
+    const popupLink = document.getElementById("ws-popup")!;
+    const container = document.getElementById("wechatsync-editor-panel")!;
 
-  switch (view) {
-    case 'loading':
-      content.innerHTML = `<div class="ws-loading">加载中...</div>`
-      break
+    // 展开面板
+    fab.addEventListener("click", () => {
+      state.collapsed = false;
+      fab.classList.add("hidden");
+      panel.classList.add("visible");
+    });
 
-    case 'empty':
-      content.innerHTML = `
+    // 收起面板
+    closeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      state.collapsed = true;
+      fab.classList.remove("hidden");
+      panel.classList.remove("visible");
+    });
+
+    // 拖动面板
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+    let startRight = 20;
+    let startBottom = 80;
+
+    header.addEventListener("mousedown", (e) => {
+      if ((e.target as HTMLElement).closest(".ws-close")) return;
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      const rect = container.getBoundingClientRect();
+      startRight = window.innerWidth - rect.right;
+      startBottom = window.innerHeight - rect.bottom;
+      e.preventDefault();
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!isDragging) return;
+      const dx = startX - e.clientX;
+      const dy = startY - e.clientY;
+      const newRight = Math.max(
+        0,
+        Math.min(window.innerWidth - 280, startRight + dx),
+      );
+      const newBottom = Math.max(
+        0,
+        Math.min(window.innerHeight - 100, startBottom + dy),
+      );
+      container.style.right = newRight + "px";
+      container.style.bottom = newBottom + "px";
+    });
+
+    document.addEventListener("mouseup", () => {
+      isDragging = false;
+    });
+
+    // 历史
+    historyLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      chrome.runtime.sendMessage({ type: "OPEN_SYNC_PAGE", path: "/history" });
+    });
+
+    // 完整面板
+    popupLink.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const article = await extractArticle();
+      if (article) {
+        await chrome.storage.local.set({ pendingArticle: article });
+      }
+      chrome.runtime.sendMessage({ type: "OPEN_SYNC_PAGE" });
+    });
+  }
+
+  async function loadPlatforms() {
+    renderView("loading");
+
+    try {
+      // CHECK_ALL_AUTH 现在返回 DSL 和 CMS 合并的列表
+      const response = await chrome.runtime.sendMessage({
+        type: "CHECK_ALL_AUTH",
+      });
+      state.platforms = (response.platforms || []).filter(
+        (p: Platform) => p.isAuthenticated,
+      );
+
+      const storage = await chrome.storage.local.get("lastSelectedPlatforms");
+      state.selectedPlatforms = storage.lastSelectedPlatforms || [];
+
+      if (state.platforms.length === 0) {
+        renderView("empty");
+      } else {
+        renderView("platforms");
+      }
+    } catch (error) {
+      logger.error("Failed to load platforms:", error);
+      renderView("empty");
+    }
+  }
+
+  function renderView(view: ViewState) {
+    state.view = view;
+    const content = document.getElementById("ws-content")!;
+
+    switch (view) {
+      case "loading":
+        content.innerHTML = `<div class="ws-loading">加载中...</div>`;
+        break;
+
+      case "empty":
+        content.innerHTML = `
         <div class="ws-empty">
           暂无已登录平台<br>
           <a href="javascript:void(0)" id="ws-login">去登录 →</a>
         </div>
-      `
-      document.getElementById('ws-login')?.addEventListener('click', (e) => {
-        e.preventDefault()
-        chrome.runtime.sendMessage({ type: 'OPEN_SYNC_PAGE' })
-      })
-      break
+      `;
+        document.getElementById("ws-login")?.addEventListener("click", (e) => {
+          e.preventDefault();
+          chrome.runtime.sendMessage({ type: "OPEN_SYNC_PAGE" });
+        });
+        break;
 
-    case 'platforms':
-      renderPlatformList()
-      break
+      case "platforms":
+        renderPlatformList();
+        break;
 
-    case 'syncing':
-      renderSyncingView()
-      break
+      case "syncing":
+        renderSyncingView();
+        break;
 
-    case 'results':
-      renderResults()
-      break
+      case "results":
+        renderResults();
+        break;
+    }
   }
-}
 
-function renderPlatformList() {
-  const content = document.getElementById('ws-content')!
-  const count = state.selectedPlatforms.length
+  function renderPlatformList() {
+    const content = document.getElementById("ws-content")!;
+    const count = state.selectedPlatforms.length;
 
-  content.innerHTML = `
+    content.innerHTML = `
     <div class="ws-section-title">选择同步平台</div>
     <div class="ws-list" id="ws-list">
-      ${state.platforms.map(p => {
-        const selected = state.selectedPlatforms.includes(p.id)
-        return `
-          <div class="ws-item ${selected ? 'selected' : ''}" data-id="${p.id}">
+      ${state.platforms
+        .map((p) => {
+          const selected = state.selectedPlatforms.includes(p.id);
+          return `
+          <div class="ws-item ${selected ? "selected" : ""}" data-id="${p.id}">
             <img src="${p.icon}" alt="${p.name}" onerror="this.style.display='none'">
             <span class="ws-item-name">${p.name}</span>
           </div>
-        `
-      }).join('')}
+        `;
+        })
+        .join("")}
     </div>
-    <button class="ws-btn ws-btn-primary" id="ws-sync" ${count === 0 ? 'disabled' : ''}>
-      ${count > 0 ? `同步到 ${count} 个平台` : '请选择平台'}
+    <button class="ws-btn ws-btn-primary" id="ws-sync" ${count === 0 ? "disabled" : ""}>
+      ${count > 0 ? `同步到 ${count} 个平台` : "请选择平台"}
     </button>
-  `
+  `;
 
-  // 绑定平台选择
-  document.querySelectorAll('.ws-item').forEach(el => {
-    el.addEventListener('click', () => {
-      const id = el.getAttribute('data-id')!
-      el.classList.toggle('selected')
+    // 绑定平台选择
+    document.querySelectorAll(".ws-item").forEach((el) => {
+      el.addEventListener("click", () => {
+        const id = el.getAttribute("data-id")!;
+        el.classList.toggle("selected");
 
-      if (el.classList.contains('selected')) {
-        if (!state.selectedPlatforms.includes(id)) {
-          state.selectedPlatforms.push(id)
+        if (el.classList.contains("selected")) {
+          if (!state.selectedPlatforms.includes(id)) {
+            state.selectedPlatforms.push(id);
+          }
+        } else {
+          state.selectedPlatforms = state.selectedPlatforms.filter(
+            (p) => p !== id,
+          );
         }
-      } else {
-        state.selectedPlatforms = state.selectedPlatforms.filter(p => p !== id)
-      }
 
-      // 更新按钮
-      const btn = document.getElementById('ws-sync') as HTMLButtonElement
-      const count = state.selectedPlatforms.length
-      btn.disabled = count === 0
-      btn.textContent = count > 0 ? `同步到 ${count} 个平台` : '请选择平台'
-    })
-  })
+        // 更新按钮
+        const btn = document.getElementById("ws-sync") as HTMLButtonElement;
+        const count = state.selectedPlatforms.length;
+        btn.disabled = count === 0;
+        btn.textContent = count > 0 ? `同步到 ${count} 个平台` : "请选择平台";
+      });
+    });
 
-  // 绑定同步按钮
-  document.getElementById('ws-sync')?.addEventListener('click', startSync)
-}
-
-// 获取阶段文本
-function getStageText(progress: PlatformProgress): string {
-  switch (progress.stage) {
-    case 'starting':
-      return '准备中...'
-    case 'uploading_images':
-      return progress.imageProgress
-        ? `上传图片 ${progress.imageProgress.current}/${progress.imageProgress.total}`
-        : '上传图片...'
-    case 'saving':
-      return '保存文章...'
-    case 'completed':
-      return '完成'
-    case 'failed':
-      return progress.error || '失败'
-    default:
-      return '等待中'
+    // 绑定同步按钮
+    document.getElementById("ws-sync")?.addEventListener("click", startSync);
   }
-}
 
-function renderSyncingView() {
-  const content = document.getElementById('ws-content')!
-  const completedCount = state.results.length
-  const totalCount = state.selectedPlatforms.length
+  // 获取阶段文本
+  function getStageText(progress: PlatformProgress): string {
+    switch (progress.stage) {
+      case "starting":
+        return "准备中...";
+      case "uploading_images":
+        return progress.imageProgress
+          ? `上传图片 ${progress.imageProgress.current}/${progress.imageProgress.total}`
+          : "上传图片...";
+      case "saving":
+        return "保存文章...";
+      case "completed":
+        return "完成";
+      case "failed":
+        return progress.error || "失败";
+      default:
+        return "等待中";
+    }
+  }
 
-  let progressHtml = ''
-  for (const platformId of state.selectedPlatforms) {
-    const platform = state.platforms.find(p => p.id === platformId)
-    const progress = state.platformProgress.get(platformId)
-    const result = state.results.find(r => r.platform === platformId)
+  function renderSyncingView() {
+    const content = document.getElementById("ws-content")!;
+    const completedCount = state.results.length;
+    const totalCount = state.selectedPlatforms.length;
 
-    if (result) {
-      // 已完成
-      progressHtml += `
-        <div class="ws-progress-item ${result.success ? 'success' : 'error'}">
-          <span class="ws-progress-icon">${result.success ? '✓' : '✗'}</span>
+    let progressHtml = "";
+    for (const platformId of state.selectedPlatforms) {
+      const platform = state.platforms.find((p) => p.id === platformId);
+      const progress = state.platformProgress.get(platformId);
+      const result = state.results.find((r) => r.platform === platformId);
+
+      if (result) {
+        // 已完成
+        progressHtml += `
+        <div class="ws-progress-item ${result.success ? "success" : "error"}">
+          <span class="ws-progress-icon">${result.success ? "✓" : "✗"}</span>
           <span class="ws-progress-name">${platform?.name || platformId}</span>
-          <span class="ws-progress-status">${result.success ? '完成' : (result.error || '失败')}</span>
+          <span class="ws-progress-status">${result.success ? "完成" : result.error || "失败"}</span>
         </div>
-      `
-    } else if (progress) {
-      // 进行中
-      progressHtml += `
+      `;
+      } else if (progress) {
+        // 进行中
+        progressHtml += `
         <div class="ws-progress-item active">
           <span class="ws-progress-icon ws-spinning">⟳</span>
           <span class="ws-progress-name">${platform?.name || platformId}</span>
           <span class="ws-progress-status">${getStageText(progress)}</span>
         </div>
-      `
-    } else {
-      // 等待中
-      progressHtml += `
+      `;
+      } else {
+        // 等待中
+        progressHtml += `
         <div class="ws-progress-item pending">
           <span class="ws-progress-icon">○</span>
           <span class="ws-progress-name">${platform?.name || platformId}</span>
           <span class="ws-progress-status">等待中</span>
         </div>
-      `
+      `;
+      }
     }
-  }
 
-  content.innerHTML = `
+    content.innerHTML = `
     <style>
       .ws-progress-header {
         display: flex;
@@ -762,324 +787,408 @@ function renderSyncingView() {
       ${progressHtml}
     </div>
     <button class="ws-btn ws-btn-secondary" id="ws-cancel" style="margin-top: 10px; font-size: 12px; padding: 6px 16px;">取消</button>
-  `
+  `;
 
-  document.getElementById('ws-cancel')?.addEventListener('click', () => {
-    state.results = []
-    state.platformProgress.clear()
-    renderView('platforms')
-  })
-}
-
-// 更新同步进度
-function updateSyncProgress(progress: PlatformProgress) {
-  state.platformProgress.set(progress.platform, progress)
-  // 如果当前是 syncing 视图，更新显示
-  if (state.view === 'syncing') {
-    renderSyncingView()
+    document.getElementById("ws-cancel")?.addEventListener("click", () => {
+      state.results = [];
+      state.platformProgress.clear();
+      renderView("platforms");
+    });
   }
-}
 
-function renderResults() {
-  const content = document.getElementById('ws-content')!
-  const successCount = state.results.filter(r => r.success).length
-  const totalCount = state.results.length
+  // 更新同步进度
+  function updateSyncProgress(progress: PlatformProgress) {
+    state.platformProgress.set(progress.platform, progress);
+    // 如果当前是 syncing 视图，更新显示
+    if (state.view === "syncing") {
+      renderSyncingView();
+    }
+  }
 
-  content.innerHTML = `
+  function renderResults() {
+    const content = document.getElementById("ws-content")!;
+    const successCount = state.results.filter((r) => r.success).length;
+    const totalCount = state.results.length;
+
+    content.innerHTML = `
     <div class="ws-section-title">同步结果 (${successCount}/${totalCount})</div>
     <div class="ws-list">
-      ${state.results.map(r => {
-        const platform = state.platforms.find(p => p.id === r.platform)
-        return `
-          <div class="ws-result ${r.success ? 'success' : 'error'}">
-            <img src="${platform?.icon || ''}" alt="${platform?.name || r.platform}" onerror="this.style.display='none'">
+      ${state.results
+        .map((r) => {
+          const platform = state.platforms.find((p) => p.id === r.platform);
+          return `
+          <div class="ws-result ${r.success ? "success" : "error"}">
+            <img src="${platform?.icon || ""}" alt="${platform?.name || r.platform}" onerror="this.style.display='none'">
             <span class="ws-result-name">${platform?.name || r.platform}</span>
-            ${r.success && r.postUrl
-              ? `<a href="${r.postUrl}" target="_blank">查看 →</a>`
-              : `<span class="ws-item-status error">${r.error || '失败'}</span>`
+            ${
+              r.success && r.postUrl
+                ? `<a href="${r.postUrl}" target="_blank">查看 →</a>`
+                : `<span class="ws-item-status error">${r.error || "失败"}</span>`
             }
           </div>
-        `
-      }).join('')}
+        `;
+        })
+        .join("")}
     </div>
     <button class="ws-btn ws-btn-secondary" id="ws-back">返回继续同步</button>
-  `
+  `;
 
-  document.getElementById('ws-back')?.addEventListener('click', () => {
-    state.results = []
-    renderView('platforms')
-  })
-}
-
-async function startSync() {
-  const article = await extractArticle()
-  if (!article) {
-    alert('未能提取文章内容\n\n请确保：\n1. 文章已保存\n2. 标题和内容不为空')
-    // 追踪文章提取失败
-    chrome.runtime.sendMessage({
-      type: 'TRACK_ARTICLE_EXTRACT',
-      payload: { source: 'weixin-editor', success: false },
-    }).catch(() => {})
-    return
+    document.getElementById("ws-back")?.addEventListener("click", () => {
+      state.results = [];
+      renderView("platforms");
+    });
   }
 
-  // 追踪文章提取成功
-  chrome.runtime.sendMessage({
-    type: 'TRACK_ARTICLE_EXTRACT',
-    payload: {
-      source: 'weixin-editor',
-      success: true,
-      hasTitle: !!article.title,
-      hasContent: !!article.content,
-      hasCover: !!article.cover,
-      contentLength: article.content?.length || 0,
-    },
-  }).catch(() => {})
-
-  if (state.selectedPlatforms.length === 0) {
-    alert('请选择要同步的平台')
-    return
-  }
-
-  await chrome.storage.local.set({ lastSelectedPlatforms: state.selectedPlatforms })
-
-  // 生成 syncId（在发送消息前设置，以便立即过滤消息）
-  const syncId = `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-
-  // 清除之前的进度状态
-  state.results = []
-  state.platformProgress.clear()
-  state.currentSyncId = syncId
-
-  renderView('syncing')
-
-  try {
-    // SYNC_ARTICLE 现在同时处理 DSL 和 CMS 平台
-    const response = await chrome.runtime.sendMessage({
-      type: 'SYNC_ARTICLE',
-      payload: { article, platforms: state.selectedPlatforms, source: 'weixin-editor', syncId },
-    })
-
-    state.results = response.results || []
-
-    // 显示频率限制警告（如果有）
-    if (response.rateLimitWarning) {
-      showRateLimitWarning(response.rateLimitWarning)
+  async function startSync() {
+    const article = await extractArticle();
+    if (!article) {
+      alert("未能提取文章内容\n\n请确保：\n1. 文章已保存\n2. 标题和内容不为空");
+      // 追踪文章提取失败
+      chrome.runtime
+        .sendMessage({
+          type: "TRACK_ARTICLE_EXTRACT",
+          payload: { source: "weixin-editor", success: false },
+        })
+        .catch(() => {});
+      return;
     }
 
-    renderView('results')
-  } catch (error) {
-    alert('同步失败：' + (error as Error).message)
-    renderView('platforms')
-  }
-}
+    // 追踪文章提取成功
+    chrome.runtime
+      .sendMessage({
+        type: "TRACK_ARTICLE_EXTRACT",
+        payload: {
+          source: "weixin-editor",
+          success: true,
+          hasTitle: !!article.title,
+          hasContent: !!article.content,
+          hasCover: !!article.cover,
+          contentLength: article.content?.length || 0,
+        },
+      })
+      .catch(() => {});
 
-async function extractArticle(): Promise<any | null> {
-  try {
-    logger.debug('Extracting article...')
+    if (state.selectedPlatforms.length === 0) {
+      alert("请选择要同步的平台");
+      return;
+    }
 
-    // 获取标题 - 尝试多种选择器
-    const titleSelectors = [
-      '#js_title_place',      // 微信编辑器标题
-      '#title',
-      'input[name="title"]',
-      '.weui-desktop-form__input',
-      '.title_input input',
-      '.js_title',
-      '[data-id="title"]',
-      '.appmsg_title input',
-      '.appmsg-edit-title input',
-    ]
-    let title = ''
-    for (const sel of titleSelectors) {
-      const el = document.querySelector(sel) as HTMLInputElement
-      // 支持 input 和 contenteditable 元素
-      const value = el?.value?.trim() || el?.textContent?.trim()
-      if (value) {
-        title = value
-        logger.debug('Title found via:', sel, '=', title.substring(0, 30))
-        break
+    await chrome.storage.local.set({
+      lastSelectedPlatforms: state.selectedPlatforms,
+    });
+
+    // 生成 syncId（在发送消息前设置，以便立即过滤消息）
+    const syncId = `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // 清除之前的进度状态
+    state.results = [];
+    state.platformProgress.clear();
+    state.currentSyncId = syncId;
+
+    renderView("syncing");
+
+    try {
+      // SYNC_ARTICLE 现在同时处理 DSL 和 CMS 平台
+      const response = await chrome.runtime.sendMessage({
+        type: "SYNC_ARTICLE",
+        payload: {
+          article,
+          platforms: state.selectedPlatforms,
+          source: "weixin-editor",
+          syncId,
+        },
+      });
+
+      state.results = response.results || [];
+
+      // 显示频率限制警告（如果有）
+      if (response.rateLimitWarning) {
+        showRateLimitWarning(response.rateLimitWarning);
       }
+
+      renderView("results");
+    } catch (error) {
+      alert("同步失败：" + (error as Error).message);
+      renderView("platforms");
     }
+  }
 
-    // 获取内容 - 尝试多种方式
-    let content = ''
+  async function extractArticle(): Promise<any | null> {
+    try {
+      logger.debug("Extracting article...");
 
-    // 方式1: 从 iframe 编辑器 (微信使用 UEditor)
-    const frameSelectors = [
-      '#ueditor_0',              // 微信默认编辑器 iframe
-      'iframe[id^="ueditor"]',   // UEditor 变体
-      '.edui-editor iframe',
-      'iframe.edui-body-container',
-    ]
-    for (const sel of frameSelectors) {
-      try {
-        const frame = document.querySelector(sel) as HTMLIFrameElement
-        if (frame?.contentDocument?.body) {
-          const body = frame.contentDocument.body
-          const testHtml = body.innerHTML
-          if (testHtml && testHtml.trim() && testHtml.trim() !== '<p><br></p>' && testHtml.length > 10) {
-            // 在 iframe 的真实 DOM 上简化代码块
-            const codeBlockBackups = backupAndSimplifyCodeBlocks(body)
-            content = body.innerHTML
-            restoreCodeBlocks(codeBlockBackups)
-            logger.debug('Content found via iframe:', sel)
-            break
+      // 获取标题 - 尝试多种选择器
+      const titleSelectors = [
+        "#js_title_place", // 微信编辑器标题
+        "#title",
+        'input[name="title"]',
+        ".weui-desktop-form__input",
+        ".title_input input",
+        ".js_title",
+        '[data-id="title"]',
+        ".appmsg_title input",
+        ".appmsg-edit-title input",
+      ];
+      let title = "";
+      for (const sel of titleSelectors) {
+        const el = document.querySelector(sel) as HTMLInputElement;
+        // 支持 input 和 contenteditable 元素
+        const value = el?.value?.trim() || el?.textContent?.trim();
+        if (value) {
+          title = value;
+          logger.debug("Title found via:", sel, "=", title.substring(0, 30));
+          break;
+        }
+      }
+
+      // 获取内容 - 尝试多种方式
+      let content = "";
+
+      // 方式1: 从 iframe 编辑器 (微信使用 UEditor)
+      const frameSelectors = [
+        "#ueditor_0", // 微信默认编辑器 iframe
+        'iframe[id^="ueditor"]', // UEditor 变体
+        ".edui-editor iframe",
+        "iframe.edui-body-container",
+      ];
+      for (const sel of frameSelectors) {
+        try {
+          const frame = document.querySelector(sel) as HTMLIFrameElement;
+          if (frame?.contentDocument?.body) {
+            const body = frame.contentDocument.body;
+            const testHtml = body.innerHTML;
+            if (
+              testHtml &&
+              testHtml.trim() &&
+              testHtml.trim() !== "<p><br></p>" &&
+              testHtml.length > 10
+            ) {
+              // 在 iframe 的真实 DOM 上简化代码块
+              const codeBlockBackups = backupAndSimplifyCodeBlocks(body);
+              content = body.innerHTML;
+              restoreCodeBlocks(codeBlockBackups);
+              logger.debug("Content found via iframe:", sel);
+              break;
+            }
+          }
+        } catch (e) {
+          // 跨域 iframe 访问可能失败
+          logger.debug("Cannot access iframe:", sel);
+        }
+      }
+
+      // 方式2: 从页面容器
+      if (!content) {
+        const containerSelectors = [
+          ".edui-body-container",
+          ".rich_media_content",
+          "#js_content",
+          ".appmsg-edit-content",
+        ];
+        for (const sel of containerSelectors) {
+          const el = document.querySelector(sel);
+          if (el?.innerHTML && el.innerHTML.trim().length > 10) {
+            // 在真实 DOM 上简化代码块
+            const codeBlockBackups = backupAndSimplifyCodeBlocks(el);
+            content = el.innerHTML;
+            restoreCodeBlocks(codeBlockBackups);
+            logger.debug("Content found via container:", sel);
+            break;
           }
         }
-      } catch (e) {
-        // 跨域 iframe 访问可能失败
-        logger.debug('Cannot access iframe:', sel)
       }
+
+      // 方式3: 通过 API 获取（已保存的文章）
+      const appmsgid = new URLSearchParams(window.location.search).get(
+        "appmsgid",
+      );
+      if (appmsgid && (!content || !title)) {
+        logger.debug("Trying API fetch for appmsgid:", appmsgid);
+        const article = await fetchArticleByApi(appmsgid);
+        if (article) {
+          logger.debug("Article fetched via API");
+          return article;
+        }
+      }
+
+      // 检查必要字段
+      if (!title) {
+        logger.warn(
+          "Title not found. Available inputs:",
+          document.querySelectorAll("input").length,
+        );
+        return null;
+      }
+
+      if (!content) {
+        logger.warn(
+          "Content not found. Available iframes:",
+          document.querySelectorAll("iframe").length,
+        );
+        return null;
+      }
+
+      // 获取封面
+      let cover = "";
+      const coverDiv = document.querySelector(
+        "div[class*='js_cover_preview_new']",
+      ) as HTMLElement;
+      if (coverDiv) {
+        const style = coverDiv.style.backgroundImage;
+        const urlMatch = style.match(/url\("([^"]+)"\)/);
+        if (urlMatch && urlMatch[1]) {
+          cover = urlMatch[1];
+        }
+      }
+      if (!cover) {
+        const coverSelectors = [
+          ".appmsg_thumb img",
+          ".js_cover img",
+          ".cover-img img",
+          ".appmsg_thumb_wrap img",
+        ];
+        for (const sel of coverSelectors) {
+          const img = document.querySelector(sel) as HTMLImageElement;
+          if (img?.src && !img.src.includes("data:")) {
+            cover = img.src;
+            break;
+          }
+        }
+      }
+
+      // 获取摘要
+      const digestSelectors = [
+        '[name="digest"]',
+        "#digest",
+        "textarea.digest",
+        ".appmsg_desc textarea",
+      ];
+      let summary = "";
+      for (const sel of digestSelectors) {
+        const el = document.querySelector(sel) as
+          | HTMLInputElement
+          | HTMLTextAreaElement;
+        if (el?.value) {
+          summary = el.value;
+          break;
+        }
+      }
+
+      logger.debug("Extracted:", {
+        title,
+        contentLen: content.length,
+        hasCover: !!cover,
+      });
+
+      // 预处理内容（处理代码块等）
+      const processedContent = preprocessContentString(content);
+
+      const markdown = htmlToMarkdownNative(processedContent);
+      return {
+        title,
+        html: processedContent,
+        content: processedContent,
+        markdown,
+        summary,
+        cover,
+        source: { url: window.location.href, platform: "weixin-editor" },
+      };
+    } catch (error) {
+      logger.error("Extract failed:", error);
+      return null;
+    }
+  }
+
+  async function fetchArticleByApi(appmsgid: string): Promise<any | null> {
+    try {
+      const tokenMatch = window.location.search.match(/token=(\d+)/);
+      if (!tokenMatch) return null;
+
+      const token = tokenMatch[1];
+      const tempRes = await fetch(
+        `https://mp.weixin.qq.com/cgi-bin/appmsg?action=get_temp_url&appmsgid=${appmsgid}&itemidx=1&token=${token}&lang=zh_CN&f=json&ajax=1`,
+        { credentials: "include" },
+      );
+      const tempData = await tempRes.json();
+      if (!tempData.temp_url) return null;
+
+      const htmlRes = await fetch(tempData.temp_url);
+      const html = await htmlRes.text();
+
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+
+      const title = doc.querySelector("#activity-name")?.textContent?.trim();
+      const contentEl = doc.querySelector("#js_content");
+      const cover = doc
+        .querySelector('meta[property="og:image"]')
+        ?.getAttribute("content");
+      const summary = doc
+        .querySelector('meta[property="og:description"]')
+        ?.getAttribute("content");
+
+      if (!title || !contentEl) return null;
+
+      // 预处理内容（处理代码块、懒加载图片等）
+      const processedContent = preprocessContentString(contentEl.innerHTML);
+
+      const markdown = htmlToMarkdownNative(processedContent);
+      return {
+        title,
+        html: processedContent,
+        content: processedContent,
+        markdown,
+        summary,
+        cover,
+        source: { url: tempData.temp_url, platform: "weixin" },
+      };
+    } catch (error) {
+      logger.error("API fetch failed:", error);
+      return null;
+    }
+  }
+
+  // 监听来自 background 的进度消息
+  chrome.runtime.onMessage.addListener((message) => {
+    // 如果消息带有 syncId，需要匹配当前的 syncId
+    if (
+      message.syncId &&
+      state.currentSyncId &&
+      message.syncId !== state.currentSyncId
+    ) {
+      return; // 忽略不匹配的消息
     }
 
-    // 方式2: 从页面容器
-    if (!content) {
-      const containerSelectors = ['.edui-body-container', '.rich_media_content', '#js_content', '.appmsg-edit-content']
-      for (const sel of containerSelectors) {
-        const el = document.querySelector(sel)
-        if (el?.innerHTML && el.innerHTML.trim().length > 10) {
-          // 在真实 DOM 上简化代码块
-          const codeBlockBackups = backupAndSimplifyCodeBlocks(el)
-          content = el.innerHTML
-          restoreCodeBlocks(codeBlockBackups)
-          logger.debug('Content found via container:', sel)
-          break
+    if (message.type === "SYNC_DETAIL_PROGRESS") {
+      const progress = message.payload;
+      if (progress?.platform) {
+        updateSyncProgress(progress);
+      }
+    }
+    if (message.type === "SYNC_PROGRESS") {
+      // 单个平台完成，添加到结果
+      const result = message.payload?.result;
+      if (result) {
+        state.results.push(result);
+        if (state.view === "syncing") {
+          renderSyncingView();
         }
       }
     }
+  });
 
-    // 方式3: 通过 API 获取（已保存的文章）
-    const appmsgid = new URLSearchParams(window.location.search).get('appmsgid')
-    if (appmsgid && (!content || !title)) {
-      logger.debug('Trying API fetch for appmsgid:', appmsgid)
-      const article = await fetchArticleByApi(appmsgid)
-      if (article) {
-        logger.debug('Article fetched via API')
-        return article
-      }
-    }
+  // 初始化
+  function init() {
+    if (!isEditorPage()) return;
 
-    // 检查必要字段
-    if (!title) {
-      logger.warn('Title not found. Available inputs:', document.querySelectorAll('input').length)
-      return null
-    }
+    const inject = () => setTimeout(injectSyncPanel, 1500);
 
-    if (!content) {
-      logger.warn('Content not found. Available iframes:', document.querySelectorAll('iframe').length)
-      return null
-    }
-
-    // 获取封面
-    const coverSelectors = ['.appmsg_thumb img', '.js_cover img', '.cover-img img', '.appmsg_thumb_wrap img']
-    let cover = ''
-    for (const sel of coverSelectors) {
-      const img = document.querySelector(sel) as HTMLImageElement
-      if (img?.src && !img.src.includes('data:')) {
-        cover = img.src
-        break
-      }
-    }
-
-    // 获取摘要
-    const digestSelectors = ['[name="digest"]', '#digest', 'textarea.digest', '.appmsg_desc textarea']
-    let summary = ''
-    for (const sel of digestSelectors) {
-      const el = document.querySelector(sel) as HTMLInputElement | HTMLTextAreaElement
-      if (el?.value) {
-        summary = el.value
-        break
-      }
-    }
-
-    logger.debug('Extracted:', { title, contentLen: content.length, hasCover: !!cover })
-
-    // 预处理内容（处理代码块等）
-    const processedContent = preprocessContentString(content)
-
-    const markdown = htmlToMarkdownNative(processedContent)
-    return { title, html: processedContent, content: processedContent, markdown, summary, cover, source: { url: window.location.href, platform: 'weixin-editor' } }
-  } catch (error) {
-    logger.error('Extract failed:', error)
-    return null
-  }
-}
-
-async function fetchArticleByApi(appmsgid: string): Promise<any | null> {
-  try {
-    const tokenMatch = window.location.search.match(/token=(\d+)/)
-    if (!tokenMatch) return null
-
-    const token = tokenMatch[1]
-    const tempRes = await fetch(
-      `https://mp.weixin.qq.com/cgi-bin/appmsg?action=get_temp_url&appmsgid=${appmsgid}&itemidx=1&token=${token}&lang=zh_CN&f=json&ajax=1`,
-      { credentials: 'include' }
-    )
-    const tempData = await tempRes.json()
-    if (!tempData.temp_url) return null
-
-    const htmlRes = await fetch(tempData.temp_url)
-    const html = await htmlRes.text()
-
-    const parser = new DOMParser()
-    const doc = parser.parseFromString(html, 'text/html')
-
-    const title = doc.querySelector('#activity-name')?.textContent?.trim()
-    const contentEl = doc.querySelector('#js_content')
-    const cover = doc.querySelector('meta[property="og:image"]')?.getAttribute('content')
-    const summary = doc.querySelector('meta[property="og:description"]')?.getAttribute('content')
-
-    if (!title || !contentEl) return null
-
-    // 预处理内容（处理代码块、懒加载图片等）
-    const processedContent = preprocessContentString(contentEl.innerHTML)
-
-    const markdown = htmlToMarkdownNative(processedContent)
-    return { title, html: processedContent, content: processedContent, markdown, summary, cover, source: { url: tempData.temp_url, platform: 'weixin' } }
-  } catch (error) {
-    logger.error('API fetch failed:', error)
-    return null
-  }
-}
-
-// 监听来自 background 的进度消息
-chrome.runtime.onMessage.addListener((message) => {
-  // 如果消息带有 syncId，需要匹配当前的 syncId
-  if (message.syncId && state.currentSyncId && message.syncId !== state.currentSyncId) {
-    return // 忽略不匹配的消息
-  }
-
-  if (message.type === 'SYNC_DETAIL_PROGRESS') {
-    const progress = message.payload
-    if (progress?.platform) {
-      updateSyncProgress(progress)
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", inject);
+    } else {
+      inject();
     }
   }
-  if (message.type === 'SYNC_PROGRESS') {
-    // 单个平台完成，添加到结果
-    const result = message.payload?.result
-    if (result) {
-      state.results.push(result)
-      if (state.view === 'syncing') {
-        renderSyncingView()
-      }
-    }
-  }
-})
 
-// 初始化
-function init() {
-  if (!isEditorPage()) return
-
-  const inject = () => setTimeout(injectSyncPanel, 1500)
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', inject)
-  } else {
-    inject()
-  }
-}
-
-init()
-})()
+  init();
+})();

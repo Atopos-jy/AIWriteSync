@@ -1,56 +1,71 @@
-import { useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, CheckCircle, XCircle, ExternalLink, Clock, Trash2, ImageIcon, Loader2 } from 'lucide-react'
-import { useSyncStore } from '../stores/sync'
-import { Button } from '../components/ui/Button'
-import { trackPageView } from '../../lib/analytics'
+import { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  ArrowLeft,
+  CheckCircle,
+  XCircle,
+  ExternalLink,
+  Clock,
+  Trash2,
+  ImageIcon,
+  Loader2,
+} from "lucide-react";
+import { useSyncStore } from "../stores/sync";
+import { Button } from "../components/ui/Button";
+import { trackPageView } from "../../lib/analytics";
 
 export function HistoryPage() {
-  const navigate = useNavigate()
-  const { history, loadHistory } = useSyncStore()
+  const navigate = useNavigate();
+  const { history, loadHistory } = useSyncStore();
 
   useEffect(() => {
-    loadHistory()
+    loadHistory();
     // 追踪页面访问
-    trackPageView('history').catch(() => {})
-  }, [])
+    trackPageView("history").catch(() => {});
+  }, []);
 
   const clearHistory = async () => {
-    await chrome.storage.local.remove('syncHistory')
-    loadHistory()
-  }
+    await chrome.storage.local.remove("syncHistory");
+    loadHistory();
+  };
 
   const formatTime = (timestamp: number) => {
-    const date = new Date(timestamp)
-    const now = new Date()
-    const diff = now.getTime() - date.getTime()
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
 
     // 今天
     if (diff < 24 * 60 * 60 * 1000 && date.getDate() === now.getDate()) {
-      return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      return date.toLocaleTimeString("zh-CN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
     }
 
     // 昨天
-    const yesterday = new Date(now)
-    yesterday.setDate(yesterday.getDate() - 1)
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
     if (date.getDate() === yesterday.getDate()) {
-      return '昨天 ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      return (
+        "昨天 " +
+        date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+      );
     }
 
     // 其他
-    return date.toLocaleDateString('zh-CN', {
-      month: 'numeric',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  }
+    return date.toLocaleDateString("zh-CN", {
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
 
   if (history.length === 0) {
     return (
       <div className="p-4 h-full flex flex-col">
         <button
-          onClick={() => navigate('/')}
+          onClick={() => navigate("/")}
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -61,14 +76,14 @@ export function HistoryPage() {
           <p>暂无同步历史</p>
         </div>
       </div>
-    )
+    );
   }
 
   return (
     <div className="p-4 h-full flex flex-col">
       {/* 返回按钮 */}
       <button
-        onClick={() => navigate('/')}
+        onClick={() => navigate("/")}
         className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4"
       >
         <ArrowLeft className="w-4 h-4" />
@@ -92,9 +107,9 @@ export function HistoryPage() {
 
       <div className="flex-1 overflow-auto space-y-3">
         {history.map((item) => {
-          const results = item.results || []
-          const successCount = results.filter(r => r.success).length
-          const failedCount = results.filter(r => !r.success).length
+          const results = item.results || [];
+          const successCount = results.filter((r) => r.success).length;
+          const failedCount = results.filter((r) => !r.success).length;
 
           return (
             <div
@@ -109,7 +124,7 @@ export function HistoryPage() {
                     alt=""
                     className="w-16 h-16 rounded object-cover flex-shrink-0"
                     onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = 'none'
+                      (e.target as HTMLImageElement).style.display = "none";
                     }}
                   />
                 ) : (
@@ -121,20 +136,24 @@ export function HistoryPage() {
                 <div className="flex-1 min-w-0">
                   {/* 标题和时间 */}
                   <div className="flex items-start justify-between gap-2 mb-1">
-                    <h3 className="font-medium text-sm line-clamp-2">{item.title}</h3>
+                    <h3 className="font-medium text-sm line-clamp-2">
+                      {item.title}
+                    </h3>
                     <span className="text-xs text-muted-foreground whitespace-nowrap">
-                      {formatTime(item.startTime ?? item.timestamp ?? Date.now())}
+                      {formatTime(
+                        item.startTime ?? item.timestamp ?? Date.now(),
+                      )}
                     </span>
                   </div>
 
                   {/* 统计 */}
                   <div className="flex items-center gap-3 text-xs">
-                    {item.status === 'syncing' ? (
+                    {item.status === "syncing" ? (
                       <div className="flex items-center gap-1 text-blue-600">
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         <span>同步中...</span>
                       </div>
-                    ) : item.status === 'cancelled' ? (
+                    ) : item.status === "cancelled" ? (
                       <div className="flex items-center gap-1 text-gray-500">
                         <XCircle className="w-3.5 h-3.5" />
                         <span>已取消</span>
@@ -162,9 +181,10 @@ export function HistoryPage() {
                         key={result.platform}
                         className={`
                           inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs
-                          ${result.success
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-red-100 text-red-700'
+                          ${
+                            result.success
+                              ? "bg-green-100 text-green-700"
+                              : "bg-red-100 text-red-700"
                           }
                         `}
                       >
@@ -186,9 +206,9 @@ export function HistoryPage() {
                 </div>
               </div>
             </div>
-          )
+          );
         })}
       </div>
     </div>
-  )
+  );
 }

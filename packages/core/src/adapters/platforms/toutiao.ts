@@ -1,51 +1,56 @@
 /**
- * 头条适配器
+ * 头条适配器（完整版，修复类型错误）
  */
-import { CodeAdapter, type ImageUploadResult } from '../code-adapter'
-import type { Article, AuthResult, SyncResult, PlatformMeta } from '../../types'
-import type { PublishOptions } from '../types'
-import { createLogger } from '../../lib/logger'
+import { CodeAdapter, type ImageUploadResult } from "../code-adapter";
+import type {
+  Article,
+  AuthResult,
+  SyncResult,
+  PlatformMeta,
+} from "../../types";
+import type { PublishOptions } from "../types";
+import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
 
-const logger = createLogger('Toutiao')
+const logger = createLogger("Toutiao");
 
 export class ToutiaoAdapter extends CodeAdapter {
   readonly meta: PlatformMeta = {
-    id: 'toutiao',
-    name: '头条',
-    icon: 'https://sf1-ttcdn-tos.pstatp.com/obj/ttfe/pgcfe/sz/mp_logo.png',
-    homepage: 'https://mp.toutiao.com/profile_v4/graphic/publish',
-    capabilities: ['article', 'draft', 'image_upload', 'cover'],
-  }
+    id: "toutiao",
+    name: "头条",
+    icon: "https://sf1-ttcdn-tos.pstatp.com/obj/ttfe/pgcfe/sz/mp_logo.png",
+    homepage: "https://mp.toutiao.com/profile_v4/graphic/publish",
+    capabilities: ["article", "draft", "image_upload", "cover"],
+  };
 
-  /** 预处理配置: 头条使用 HTML，移除外链 */
   readonly preprocessConfig = {
-    outputFormat: 'html' as const,
+    outputFormat: "html" as const,
     removeLinks: true,
     removeEmptyImages: true,
     removeDataAttributes: true,
     flattenNestedBold: true,
     unwrapSingleChildSpans: true,
-  }
+  };
 
-  /** 头条 API 需要的 Header 规则 */
   private readonly HEADER_RULES = [
     {
-      urlFilter: '*://mp.toutiao.com/*',
+      urlFilter: "*://mp.toutiao.com/*",
       headers: {
-        'Origin': 'https://mp.toutiao.com',
-        'Referer': 'https://mp.toutiao.com/profile_v4/graphic/publish',
+        Origin: "https://mp.toutiao.com",
+        Referer: "https://mp.toutiao.com/profile_v4/graphic/publish",
       },
-      resourceTypes: ['xmlhttprequest'],
+      resourceTypes: ["xmlhttprequest"],
     },
-  ]
+  ];
 
+  // ==================== 认证相关 ====================
   async checkAuth(): Promise<AuthResult> {
     try {
       const res = await this.get<{
-        data?: { user?: { id: number; screen_name: string; https_avatar_url: string } }
-      }>('https://mp.toutiao.com/mp/agw/media/get_media_info')
-
-      logger.debug('checkAuth response:', res)
+        data?: {
+          user?: { id: number; screen_name: string; https_avatar_url: string };
+        };
+      }>("https://mp.toutiao.com/mp/agw/media/get_media_info");
 
       if (res.data?.user?.id) {
         return {
@@ -53,289 +58,445 @@ export class ToutiaoAdapter extends CodeAdapter {
           userId: String(res.data.user.id),
           username: res.data.user.screen_name,
           avatar: res.data.user.https_avatar_url,
-        }
+        };
       }
-
-      return { isAuthenticated: false }
+      return { isAuthenticated: false };
     } catch (error) {
-      logger.debug('checkAuth: not logged in -', error)
-      return { isAuthenticated: false, error: (error as Error).message }
+      return { isAuthenticated: false, error: (error as Error).message };
     }
   }
 
-  /**
-   * 获取 x-secsdk-csrf-token
-   */
   private async getCsrfToken(): Promise<string> {
-    const response = await this.runtime.fetch('https://mp.toutiao.com/ttwid/check/', {
-      method: 'HEAD',
-      credentials: 'include',
-      headers: {
-        'x-secsdk-csrf-request': '1',
-        'x-secsdk-csrf-version': '1.2.22',
+    const response = await this.runtime.fetch(
+      "https://mp.toutiao.com/ttwid/check/",
+      {
+        method: "HEAD",
+        credentials: "include",
+        headers: {
+          "x-secsdk-csrf-request": "1",
+          "x-secsdk-csrf-version": "1.2.22",
+        },
       },
-    })
-    // token 在响应头里
-    return response.headers.get('x-ware-csrf-token') || ''
+    );
+    return response.headers.get("x-ware-csrf-token") || "";
   }
 
-  async publish(article: Article, options?: PublishOptions): Promise<SyncResult> {
+  // ==================== 发布主流程 ====================
+  async publish(
+    article: Article,
+    options?: PublishOptions,
+  ): Promise<SyncResult> {
     return this.withHeaderRules(this.HEADER_RULES, async () => {
-      logger.info('Starting publish...')
+      // 1. 认证检查
+      const auth = await this.checkAuth();
+      if (!auth.isAuthenticated) {
+        throw new Error("头条账号未登录，请先登录 mp.toutiao.com");
+      }
 
-      // Use pre-processed HTML content directly
-      let content = article.html || ''
-      // Remove empty figure tags
-      content = content.replace(/<figure[^>]*>\s*<\/figure>/gi, '')
-      // Remove excessive blank lines
-      content = content.replace(/\n{3,}/g, '\n\n')
+      // 使用文章处理器处理内容（头条使用 HTML 格式）
+      const processed = ArticleProcessor.processHtmlContent(article, {
+        supportsTags: false, // 头条不支持标签字段，需拼接到内容中
+        supportsSummary: false, // 头条不支持摘要字段
+        supportsCategory: false, // 头条不支持分类字段
+        supportsCover: true, // 头条支持封面
+        supportsAuthor: false, // 头条不支持作者字段，需拼接到内容中
+      });
 
-      // Process images
-      content = await this.processImages(
-        content,
+      // 处理正文图片（上传后得到原图URL）
+      let content = await this.processImages(
+        processed.content,
         (src) => this.uploadImageByUrl(src),
         {
-          skipPatterns: ['pstatp.com', 'toutiao.com', 'byteimg.com'],
+          skipPatterns: ["pstatp.com", "toutiao.com", "byteimg.com"],
           onProgress: options?.onImageProgress,
-        }
-      )
-      // 将图片包装成头条格式: <div class="pgc-img"><img ...><p class="pgc-img-caption"></p></div>
+        },
+      );
+
       content = content.replace(
         /<img\s+([^>]+)>/gi,
-        '<div class="pgc-img"><img $1><p class="pgc-img-caption"></p></div>'
-      )
+        '<div class="pgc-img"><img $1><p class="pgc-img-caption"></p></div>',
+      );
 
-      // 4. 处理封面 (暂时禁用以排查问题)
-      // TODO: 后续需要重新启用封面上传
-      // let coverInfo: ImageUploadResult | null = null
-      // if (article.cover) {
-      //   try {
-      //     coverInfo = await this.uploadImageByUrl(article.cover)
-      //   } catch (e) {
-      //     console.warn('[Toutiao] Failed to upload cover:', e)
-      //   }
-      // }
-
-      // 5. 构建封面 JSON (暂时禁用封面以排查问题)
-      const pgcFeedCovers = '[]'
-
-      // 6. 构建请求参数
+      // 构建发布数据
       const extra = JSON.stringify({
         content_source: 100000000402,
         content_word_cnt: content.length,
         is_multi_title: 0,
         sub_titles: [],
         gd_ext: {
-          entrance: '',
-          from_page: 'publisher_mp',
-          enter_from: 'PC',
-          device_platform: 'mp',
+          entrance: "",
+          from_page: "publisher_mp",
+          enter_from: "PC",
+          device_platform: "mp",
           is_message: 0,
         },
-      })
+      });
 
-      const titleId = `${Date.now()}_${Math.random().toString().slice(2, 18)}`
+      const titleId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
-      // 7. 构建表单数据
-      const formData = new URLSearchParams()
-      formData.append('pgc_id', '0')
-      formData.append('source', '29')
-      formData.append('extra', extra)
-      formData.append('content', content)
-      formData.append('title', article.title)
-      formData.append('search_creation_info', JSON.stringify({ searchTopOne: 0, abstract: '', clue_id: '' }))
-      formData.append('title_id', titleId)
-      formData.append('mp_editor_stat', '{}')
-      formData.append('is_refute_rumor', '0')
-      formData.append('save', '0')
-      formData.append('timer_status', '0')
-      formData.append('timer_time', '')
-      formData.append('educluecard', '')
-      formData.append('draft_form_data', JSON.stringify({ coverType: 3 }))
-      formData.append('pgc_feed_covers', pgcFeedCovers)
-      formData.append('article_ad_type', '0') // 0: 不投放广告, 3: 投放广告(需要广告权限)
-      formData.append('is_fans_article', '0')
-      formData.append('govern_forward', '0')
-      formData.append('praise', '0')
-      formData.append('disable_praise', '0')
-      formData.append('tree_plan_article', '0')
-      formData.append('activity_tag', '0')
-      formData.append('trends_writing_tag', '0')
-      formData.append('claim_exclusive', '0')
+      // 获取 CSRF Token
+      const csrfToken = await this.getCsrfToken();
 
-      // 8. 通过 content script 使用页面 fetch 发布（自动注入 msToken/a_bogus）
-      const res = await this.publishViaContentScript(
-        'https://mp.toutiao.com/mp/agw/article/publish?source=mp&type=article&aid=1231',
-        formData.toString()
-      )
-
-      logger.debug('publish response:', res)
-
-      if (res.err_no !== 0 || !res.data?.pgc_id) {
-        throw new Error(res.message || '发布失败')
+      // 如果有封面，先上传封面图片
+      let coverData = null;
+      if (processed.cover) {
+        console.log("[Toutiao] 上传封面图片:", processed.cover);
+        const coverUploadResult = await this.uploadImageByUrl(processed.cover);
+        console.log("[Toutiao] 封面上传成功:", coverUploadResult);
+        coverData = {
+          cover_url: coverUploadResult.coverUrl || coverUploadResult.url,
+          image_url: coverUploadResult.url,
+          image_uri: coverUploadResult.attrs?.image_uri || "",
+          image_width: parseInt(
+            String(coverUploadResult.attrs?.img_width) || "0",
+          ),
+          image_height: parseInt(
+            String(coverUploadResult.attrs?.img_height) || "0",
+          ),
+        };
       }
 
-      const draftId = res.data.pgc_id
-      const draftUrl = `https://mp.toutiao.com/profile_v4/graphic/publish?pgc_id=${draftId}`
+      // 6. 通过 content script 执行发布流程
+      const tabId = await this.ensureToutiaoTab();
+
+      const result = await this.runtime.tabs?.executeScript<
+        { success: boolean; data?: any; error?: string },
+        [string, string, string, string, string, boolean, string]
+      >(
+        tabId,
+        async (
+          fetchCsrfToken: string,
+          fetchContent: string,
+          fetchTitle: string,
+          fetchExtra: string,
+          fetchTitleId: string,
+          fetchDraftOnly: boolean,
+          fetchCoverData: string,
+        ) => {
+          console.log("[ContentScript] Script started");
+          console.log("[ContentScript] Parameters:", {
+            csrfToken: fetchCsrfToken.substring(0, 20) + "...",
+            contentLength: fetchContent.length,
+            title: fetchTitle,
+            hasCover: !!fetchCoverData,
+            extraLength: fetchExtra.length,
+            titleId: fetchTitleId,
+            draftOnly: fetchDraftOnly,
+          });
+          try {
+            console.log("[ContentScript] Start publish process");
+            let pgcFeedCovers = "[]";
+            const draftFormData: any = { coverType: 3 };
+
+            // 如果有封面数据，直接构建封面对象
+            const hasCover = fetchCoverData && fetchCoverData !== "{}";
+            if (hasCover) {
+              const coverData = JSON.parse(fetchCoverData);
+              console.log("[ContentScript] Cover data:", coverData);
+
+              // 封面尺寸校验
+              if (coverData.image_width < 300 || coverData.image_height < 200) {
+                throw new Error("封面尺寸过小，要求至少 300x200");
+              }
+
+              // 构建封面数据（符合头条要求的结构）
+              const coverObject = {
+                id: coverData.image_uri,
+                url: coverData.cover_url,
+                uri: coverData.image_uri,
+                origin_uri: coverData.image_uri,
+                ic_uri: coverData.image_uri,
+                thumb_width: coverData.image_width,
+                thumb_height: coverData.image_height,
+              };
+              pgcFeedCovers = JSON.stringify([coverObject]);
+              draftFormData.coverType = 1;
+              draftFormData.cover = [coverObject];
+            }
+
+            // 构建发布请求表单
+            const publishFormData = new URLSearchParams();
+            publishFormData.append("pgc_id", "0");
+            publishFormData.append("source", "29");
+            publishFormData.append("extra", fetchExtra);
+            publishFormData.append("content", fetchContent);
+            publishFormData.append("title", fetchTitle);
+            publishFormData.append(
+              "search_creation_info",
+              JSON.stringify({
+                searchTopOne: 0,
+                abstract: "",
+                clue_id: "",
+              }),
+            );
+            publishFormData.append("title_id", fetchTitleId);
+            publishFormData.append("mp_editor_stat", "{}");
+            publishFormData.append("is_refute_rumor", "0");
+            const saveValue = fetchDraftOnly === false ? "0" : "1";
+            publishFormData.append("save", saveValue);
+            publishFormData.append("timer_status", "0");
+            publishFormData.append("timer_time", "");
+            publishFormData.append("educluecard", "");
+            publishFormData.append(
+              "draft_form_data",
+              JSON.stringify(draftFormData),
+            );
+            publishFormData.append("pgc_feed_covers", pgcFeedCovers);
+            publishFormData.append("article_ad_type", "0");
+            publishFormData.append("is_fans_article", "0");
+            publishFormData.append("govern_forward", "0");
+            publishFormData.append("praise", "0");
+            publishFormData.append("disable_praise", "0");
+            publishFormData.append("tree_plan_article", "0");
+            publishFormData.append("activity_tag", "0");
+            publishFormData.append("trends_writing_tag", "0");
+            publishFormData.append("claim_exclusive", "0");
+
+            // 发布文章
+            const publishUrl =
+              "https://mp.toutiao.com/mp/agw/article/publish?source=mp&type=article&aid=1231";
+            console.log("[ContentScript] Publish URL:", publishUrl);
+            console.log(
+              "[ContentScript] Publish form data keys:",
+              Array.from(publishFormData.keys()),
+            );
+            console.log(
+              "[ContentScript] Publish pgcFeedCovers:",
+              publishFormData.get("pgc_feed_covers"),
+            );
+
+            let publishResult: any;
+            try {
+              const publishResponse = await fetch(publishUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/x-www-form-urlencoded",
+                },
+                credentials: "include",
+                body: publishFormData.toString(),
+              });
+
+              console.log(
+                "[ContentScript] Publish response status:",
+                publishResponse.status,
+              );
+              const publishText = await publishResponse.text();
+              console.log(
+                "[ContentScript] Publish response text:",
+                publishText,
+              );
+              publishResult = JSON.parse(publishText);
+              console.log("[ContentScript] Publish result:", publishResult);
+            } catch (publishError) {
+              console.error("[ContentScript] Publish error:", publishError);
+              throw new Error(
+                `发布请求失败: ${(publishError as Error).message}`,
+              );
+            }
+
+            return { success: true, data: publishResult };
+          } catch (error) {
+            console.error("[ContentScript] Error:", error);
+            return { success: false, error: (error as Error).message };
+          }
+        },
+        [
+          csrfToken,
+          content,
+          processed.title,
+          extra,
+          titleId,
+          options?.draftOnly ?? true,
+          JSON.stringify(coverData || {}),
+        ],
+      );
+
+      console.log("[Toutiao] executeScript result:", result);
+      if (!result) {
+        throw new Error(
+          "executeScript returned undefined – script may have failed to run",
+        );
+      }
+      if (!result.success) {
+        throw new Error(result.error || "发布请求失败");
+      }
+
+      const res = result.data;
+
+      if (res.err_no !== 0 || !res.data?.pgc_id) {
+        throw new Error(res.message || `发布失败，错误码: ${res.err_no}`);
+      }
+
+      const draftId = res.data.pgc_id;
+      const draftUrl = `https://mp.toutiao.com/profile_v4/graphic/publish?pgc_id=${draftId}`;
 
       return this.createResult(true, {
         postId: draftId,
         postUrl: draftUrl,
         draftOnly: options?.draftOnly ?? true,
-      })
-    }).catch((error) => this.createResult(false, {
-      error: (error as Error).message,
-    }))
+      });
+    }).catch((error) =>
+      this.createResult(false, { error: (error as Error).message }),
+    );
   }
 
-  /**
-   * 确保头条 tab 存在，如果不存在则自动创建
-   */
+  // ==================== 页面 Tab 管理 ====================
   private async ensureToutiaoTab(): Promise<number> {
     if (!this.runtime.tabs) {
-      throw new Error('头条发布需要浏览器 tabs API 支持')
+      throw new Error("头条发布需要浏览器 tabs API 支持");
     }
 
-    // 查找已存在的头条页面 tab
-    const tabs = await this.runtime.tabs.query('https://mp.toutiao.com/*')
-
+    const tabs = await this.runtime.tabs.query("https://mp.toutiao.com/*");
     if (tabs.length > 0 && tabs[0].id) {
-      return tabs[0].id
+      return tabs[0].id;
     }
 
-    // 没有则创建新 tab
-    logger.info('No existing tab found, creating new one...')
+    logger.info("No existing tab found, creating new one...");
     const tab = await this.runtime.tabs.create(
-      'https://mp.toutiao.com/profile_v4/graphic/publish',
-      false // 后台打开
-    )
-
-    // 等待页面加载完成
-    await this.runtime.tabs.waitForLoad(tab.id, 30000)
-
-    logger.info('New tab created and loaded:', tab.id)
-    return tab.id
+      "https://mp.toutiao.com/profile_v4/graphic/publish",
+      false,
+    );
+    await this.runtime.tabs.waitForLoad(tab.id, 30000);
+    logger.info("New tab created and loaded:", tab.id);
+    return tab.id;
   }
 
-  /**
-   * 通过 runtime.tabs.executeScript 在页面上下文执行 fetch
-   * 页面会自动注入 msToken/a_bogus 等反爬参数
-   */
-  private async publishViaContentScript(url: string, body: string): Promise<{
-    err_no?: number
-    data?: { pgc_id: string }
-    message?: string
-  }> {
-    if (!this.runtime.tabs) {
-      throw new Error('头条发布需要浏览器 tabs API 支持')
+  // ==================== 图片上传 ====================
+  protected async uploadImageByUrl(
+    src: string,
+  ): Promise<ImageUploadResult & { coverUrl?: string; originalUrl?: string }> {
+    console.log("[Toutiao] 开始上传图片:", src);
+
+    // 1. 下载图片
+    const imageResponse = await this.runtime.fetch(src);
+    if (!imageResponse.ok) {
+      throw new Error(`图片下载失败: ${src} (状态码: ${imageResponse.status})`);
     }
+    const imageBlob = await imageResponse.blob();
+    console.log("[Toutiao] 图片下载成功，大小:", imageBlob.size, "字节");
 
-    // 确保有头条 tab
-    const tabId = await this.ensureToutiaoTab()
-    logger.debug('Using tab:', tabId, 'to execute fetch in MAIN world')
+    // 2. 获取 CSRF Token
+    const csrfToken = await this.getCsrfToken();
 
-    // 在页面上下文 (MAIN world) 执行 fetch
-    const result = await this.runtime.tabs.executeScript<
-      { success: boolean; data?: unknown; error?: string },
+    // 3. 通过页面上下文上传
+    return this.uploadImageViaContentScript(imageBlob, csrfToken);
+  }
+
+  private async uploadImageViaContentScript(
+    imageBlob: Blob,
+    csrfToken: string,
+  ): Promise<ImageUploadResult & { coverUrl?: string; originalUrl?: string }> {
+    const tabId = await this.ensureToutiaoTab();
+    console.log("[Toutiao] 使用标签页:", tabId, "在 MAIN world 中上传图片");
+
+    // 将 Blob 转换为 base64（用于传递）
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        if (!result) {
+          reject(new Error("FileReader 读取失败"));
+          return;
+        }
+        const base64Data = result.split(",")[1];
+        if (!base64Data) {
+          reject(new Error("无法提取 base64 数据"));
+          return;
+        }
+        console.log(
+          "[Toutiao] 图片转换为 base64 成功，长度:",
+          base64Data.length,
+        );
+        resolve(base64Data);
+      };
+      reader.onerror = () => reject(new Error("FileReader 错误"));
+      reader.readAsDataURL(imageBlob);
+    });
+
+    // 在页面上下文中执行上传（修正泛型）
+    const result = await this.runtime.tabs?.executeScript<
+      { success: boolean; data?: any; error?: string },
       [string, string]
     >(
       tabId,
-      async (fetchUrl: string, fetchBody: string) => {
+      async (uploadCsrfToken: string, imageBase64: string) => {
         try {
-          const response = await fetch(fetchUrl, {
-            method: 'POST',
+          const uploadUrl =
+            "https://mp.toutiao.com/spice/image?upload_source=20020003&aid=1231&device_platform=web&need_cover_url=1";
+          console.log("[Toutiao] 开始上传图片，URL:", uploadUrl);
+
+          // base64 转 Blob
+          const byteCharacters = atob(imageBase64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: "image/jpeg" });
+
+          const formData = new FormData();
+          formData.append("image", blob, "image.jpg");
+
+          const response = await fetch(uploadUrl, {
+            method: "POST",
             headers: {
-              'Content-Type': 'application/x-www-form-urlencoded',
+              "x-secsdk-csrf-token": uploadCsrfToken,
             },
-            body: fetchBody,
-            credentials: 'include',
-          })
-          const data = await response.json()
-          return { success: true, data }
+            credentials: "include",
+            body: formData,
+          });
+
+          const text = await response.text();
+          console.log("[Toutiao] 上传响应内容:", text);
+          try {
+            const data = JSON.parse(text);
+            return { success: true, data };
+          } catch {
+            return {
+              success: false,
+              error: `响应解析失败: ${text.substring(0, 100)}`,
+            };
+          }
         } catch (error) {
-          return { success: false, error: (error as Error).message }
+          return { success: false, error: (error as Error).message };
         }
       },
-      [url, body]
-    )
+      [csrfToken, base64],
+    );
 
     if (!result || !result.success) {
-      throw new Error(result?.error || '发布请求失败')
+      throw new Error(result?.error || "图片上传请求失败");
     }
 
-    return result.data as { err_no?: number; data?: { pgc_id: string }; message?: string }
-  }
-
-  /**
-   * 通过 URL 上传图片
-   * 新接口需要先下载图片再上传
-   */
-  protected async uploadImageByUrl(src: string): Promise<ImageUploadResult> {
-    // 1. 下载图片
-    const imageResponse = await fetch(src)
-    if (!imageResponse.ok) {
-      throw new Error('图片下载失败: ' + src)
-    }
-    const imageBlob = await imageResponse.blob()
-
-    // 2. 获取 csrf token
-    const csrfToken = await this.getCsrfToken()
-
-    // 3. 上传到新接口
-    const formData = new FormData()
-    formData.append('image', imageBlob, 'image.jpg')
-
-    const uploadUrl = 'https://mp.toutiao.com/spice/image?upload_source=20020002&aid=1231&device_platform=web'
-    const uploadResponse = await this.runtime.fetch(uploadUrl, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'x-secsdk-csrf-token': csrfToken,
-      },
-      body: formData,
-    })
-
-    const text = await uploadResponse.text()
-    let res: {
-      code?: number
-      data?: {
-        image_uri?: string
-        image_url?: string
-        image_width?: number
-        image_height?: number
-      }
-      message?: string
-    }
-
-    try {
-      res = JSON.parse(text)
-    } catch {
-      throw new Error('图片上传响应解析失败')
-    }
-
-    logger.debug('Image upload response:', res)
-
+    const res = result.data;
     if (res.code !== 0 || !res.data) {
-      throw new Error(res.message || '图片上传失败')
+      throw new Error(res.message || "图片上传失败");
     }
 
-    // 验证返回的 URL 不为空
-    if (!res.data.image_url || !res.data.image_uri) {
-      logger.error('Upload response missing URL:', res)
-      throw new Error('图片上传返回数据不完整')
-    }
+    // 提取关键数据，确保类型安全
+    const imageUri = res.data.image_uri;
+    const imageUrl = res.data.image_url; // 原图 URL（~tplv-obj.image）
+    const coverUrl = res.data.cover_url; // 封面专用 URL（~tplv-tt-cover-v2.image）
+    const width = res.data.image_width;
+    const height = res.data.image_height;
 
+    console.log("[Toutiao] 图片上传成功，原图 URL:", imageUrl);
+    console.log("[Toutiao] 封面 URL:", coverUrl);
+
+    // 返回符合 ImageUploadResult 的结构，并附加 coverUrl / originalUrl
     return {
-      url: res.data.image_url,
+      url: imageUrl, // 供正文使用的原图 URL
+      originalUrl: imageUrl,
+      coverUrl: coverUrl,
       attrs: {
-        'class': '',
-        'ic-uri': '',
-        'image_type': 'image/png',
-        'mime_type': '',
-        'web_uri': res.data.image_uri,
-        'img_width': String(res.data.image_width || 0),
-        'img_height': String(res.data.image_height || 0),
+        class: "",
+        "ic-uri": "",
+        image_type: "image/jpeg",
+        mime_type: "image/jpeg",
+        image_uri: imageUri,
+        img_width: String(width),
+        img_height: String(height),
       },
-    }
+    };
   }
 }

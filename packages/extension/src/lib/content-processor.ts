@@ -9,22 +9,22 @@
  * 5. Service Worker 只做图片上传 + 调用 API
  */
 
-import { htmlToMarkdownNative, type PreprocessConfig } from '@wechatsync/core'
-import { createLogger } from './logger'
+import { htmlToMarkdownNative, type PreprocessConfig } from "@wechatsync/core";
+import { createLogger } from "./logger";
 
-const logger = createLogger('ContentProcessor')
+const logger = createLogger("ContentProcessor");
 
 // 注意：htmlToMarkdownNative 需要 DOM 环境，只能在 Content Script 中使用
 
 // Re-export PreprocessConfig for backward compatibility
-export type { PreprocessConfig }
+export type { PreprocessConfig };
 
 /**
  * 预处理结果
  */
 export interface PreprocessResult {
-  html: string
-  markdown: string
+  html: string;
+  markdown: string;
 }
 
 /**
@@ -36,121 +36,131 @@ export interface PreprocessResult {
  * 注意：代码块应在入口处用 backupAndSimplifyCodeBlocks 在原始 DOM 上预处理，
  * 此函数中的 processCodeBlocks 会跳过已处理的代码块（有 data-code-simplified 标记）
  */
-export function preprocessForPlatform(rawHtml: string, config: PreprocessConfig): PreprocessResult {
+export function preprocessForPlatform(
+  rawHtml: string,
+  config: PreprocessConfig,
+): PreprocessResult {
   // 创建临时 DOM 容器
-  const container = document.createElement('div')
-  container.innerHTML = rawHtml
+  const container = document.createElement("div");
+  container.innerHTML = rawHtml;
 
   if (config.processCodeBlocks) {
-    processCodeBlocks(container)
+    processCodeBlocks(container);
   }
 
   // 按配置执行预处理
   if (config.removeComments) {
-    removeComments(container)
+    removeComments(container);
   }
 
   if (config.removeIframes) {
-    removeElements(container, ['iframe'])
+    removeElements(container, ["iframe"]);
   }
 
   if (config.removeSpecialTags) {
     if (config.removeSpecialTagsWithParent) {
       // 知乎等平台：移除特殊标签的父元素
-      removeElementsWithParent(container, ['mpprofile', 'qqmusic'])
+      removeElementsWithParent(container, ["mpprofile", "qqmusic"]);
       // 其他特殊标签只移除自身
       removeElements(container, [
-        'mpvoice', 'mpcps', 'mp-miniprogram', 'mp-common-product',
-      ])
+        "mpvoice",
+        "mpcps",
+        "mp-miniprogram",
+        "mp-common-product",
+      ]);
     } else {
       removeElements(container, [
-        'mpprofile', 'qqmusic', 'mpvoice', 'mpcps',
-        'mp-miniprogram', 'mp-common-product',
-      ])
+        "mpprofile",
+        "qqmusic",
+        "mpvoice",
+        "mpcps",
+        "mp-miniprogram",
+        "mp-common-product",
+      ]);
     }
   }
 
   if (config.removeSvgImages) {
-    processSvgImages(container)
+    processSvgImages(container);
   }
 
   // 移除 script 和 style（总是执行）
-  removeElements(container, ['script', 'style', 'noscript'])
+  removeElements(container, ["script", "style", "noscript"]);
 
   if (config.removeLinks) {
-    processLinks(container, config.keepLinkDomains)
+    processLinks(container, config.keepLinkDomains);
   }
 
   if (config.processLazyImages) {
-    processLazyImages(container)
+    processLazyImages(container);
   }
 
   if (config.removeEmptyElements) {
-    removeEmptyElements(container)
+    removeEmptyElements(container);
   }
 
   if (config.removeEmptyImages) {
-    removeEmptyImages(container)
+    removeEmptyImages(container);
   }
 
   if (config.removeDataAttributes) {
-    removeDataAttributes(container)
+    removeDataAttributes(container);
   }
 
   if (config.removeSrcset || config.removeSizes) {
-    removeImageAttributes(container, config)
+    removeImageAttributes(container, config);
   }
 
   if (config.convertSectionToDiv) {
-    convertSections(container, 'div')
+    convertSections(container, "div");
   } else if (config.convertSectionToP) {
-    convertSections(container, 'p')
+    convertSections(container, "p");
   }
 
   // 知乎等平台需要的额外处理
   if (config.removeTrailingBr) {
-    removeTrailingBr(container)
+    removeTrailingBr(container);
   }
 
   if (config.unwrapNestedFigures) {
-    unwrapNestedFigures(container)
+    unwrapNestedFigures(container);
   }
 
   if (config.flattenNestedBold) {
-    flattenNestedBold(container)
+    flattenNestedBold(container);
   }
 
   if (config.unwrapSingleChildSpans) {
-    unwrapSingleChildSpans(container)
+    unwrapSingleChildSpans(container);
   }
 
   if (config.unwrapSingleChildContainers) {
-    unwrapSingleChildContainers(container)
+    unwrapSingleChildContainers(container);
   }
 
   if (config.compactHtml) {
-    compactHtml(container)
+    compactHtml(container);
   }
 
   // 清理空内容
   if (config.removeEmptyLines) {
-    removeEmptyLines(container)
+    removeEmptyLines(container);
   }
 
   if (config.removeEmptyDivs) {
-    removeEmptyDivs(container)
+    removeEmptyDivs(container);
   }
 
   if (config.removeNestedEmptyContainers) {
-    removeNestedEmptyContainers(container)
+    removeNestedEmptyContainers(container);
   }
 
   // 获取处理后的 HTML
-  const html = container.innerHTML
+  const html = container.innerHTML;
 
   // 总是生成 markdown，确保需要 markdown 的适配器能获取到内容
-  const markdown = htmlToMarkdownNative(html)
-  return { html, markdown }
+  const markdown = htmlToMarkdownNative(html);
+  return { html, markdown };
 }
 
 /**
@@ -161,15 +171,15 @@ export function preprocessForPlatform(rawHtml: string, config: PreprocessConfig)
  */
 export function preprocessForMultiplePlatforms(
   rawHtml: string,
-  configs: Record<string, PreprocessConfig>
+  configs: Record<string, PreprocessConfig>,
 ): Record<string, PreprocessResult> {
-  const results: Record<string, PreprocessResult> = {}
+  const results: Record<string, PreprocessResult> = {};
 
   for (const [platformId, config] of Object.entries(configs)) {
-    results[platformId] = preprocessForPlatform(rawHtml, config)
+    results[platformId] = preprocessForPlatform(rawHtml, config);
   }
 
-  return results
+  return results;
 }
 
 // ============ 预处理函数 ============
@@ -181,96 +191,99 @@ function removeComments(container: HTMLElement): void {
   const iterator = document.createNodeIterator(
     container,
     NodeFilter.SHOW_COMMENT,
-    null
-  )
-  const comments: Comment[] = []
-  let node: Comment | null
+    null,
+  );
+  const comments: Comment[] = [];
+  let node: Comment | null;
   while ((node = iterator.nextNode() as Comment | null)) {
-    comments.push(node)
+    comments.push(node);
   }
-  comments.forEach((comment) => comment.remove())
+  comments.forEach((comment) => comment.remove());
 }
 
 /**
  * 移除匹配选择器的元素
  */
 function removeElements(container: HTMLElement, selectors: string[]): void {
-  const selector = selectors.join(', ')
-  container.querySelectorAll(selector).forEach((el) => el.remove())
+  const selector = selectors.join(", ");
+  container.querySelectorAll(selector).forEach((el) => el.remove());
 }
 
 /**
  * 移除匹配选择器的元素及其父元素
  * 用于处理 mpprofile, qqmusic 等微信特殊标签
  */
-function removeElementsWithParent(container: HTMLElement, selectors: string[]): void {
-  const selector = selectors.join(', ')
+function removeElementsWithParent(
+  container: HTMLElement,
+  selectors: string[],
+): void {
+  const selector = selectors.join(", ");
   container.querySelectorAll(selector).forEach((el) => {
     // 移除父元素（如果存在且不是 container 本身）
-    const parent = el.parentElement
+    const parent = el.parentElement;
     if (parent && parent !== container) {
-      parent.remove()
+      parent.remove();
     } else {
-      el.remove()
+      el.remove();
     }
-  })
+  });
 }
 
 /**
  * 处理 SVG 占位图片
  */
 function processSvgImages(container: HTMLElement): void {
-  const svgImages = container.querySelectorAll('img[src^="data:image/svg"]')
+  const svgImages = container.querySelectorAll('img[src^="data:image/svg"]');
   svgImages.forEach((img) => {
-    const dataSrc = img.getAttribute('data-src')
+    const dataSrc = img.getAttribute("data-src");
     if (dataSrc) {
-      img.setAttribute('src', dataSrc)
+      img.setAttribute("src", dataSrc);
     } else {
-      img.remove()
+      img.remove();
     }
-  })
+  });
 }
 
 /**
  * 处理链接
  */
 function processLinks(container: HTMLElement, keepDomains?: string[]): void {
-  const links = container.querySelectorAll('a')
+  const links = container.querySelectorAll("a");
 
   links.forEach((link) => {
-    const href = link.getAttribute('href')
+    const href = link.getAttribute("href");
 
     if (href && keepDomains?.length) {
-      const shouldKeep = keepDomains.some(domain => href.includes(domain))
-      if (shouldKeep) return
+      const shouldKeep = keepDomains.some((domain) => href.includes(domain));
+      if (shouldKeep) return;
     }
 
     // 用 span 替换 a 标签
-    const span = document.createElement('span')
-    span.innerHTML = link.innerHTML
-    link.parentNode?.replaceChild(span, link)
-  })
+    const span = document.createElement("span");
+    span.innerHTML = link.innerHTML;
+    link.parentNode?.replaceChild(span, link);
+  });
 }
 
 /**
  * 处理懒加载图片
  */
 function processLazyImages(container: HTMLElement): void {
-  const imgs = container.querySelectorAll('img')
-  const lazySrcAttrs = ['data-src', 'data-original', 'data-actualsrc', '_src']
+  const imgs = container.querySelectorAll("img");
+  const lazySrcAttrs = ["data-src", "data-original", "data-actualsrc", "_src"];
 
   imgs.forEach((img) => {
     for (const attr of lazySrcAttrs) {
-      const lazySrc = img.getAttribute(attr)
-      if (lazySrc && !lazySrc.startsWith('data:image/svg')) {
-        if (!img.src || img.src.startsWith('data:image/svg')) {
-          img.src = lazySrc
+      const lazySrc = img.getAttribute(attr);
+      if (lazySrc && !lazySrc.startsWith("data:image/svg")) {
+        if (!img.src || img.src.startsWith("data:image/svg")) {
+          img.src = lazySrc;
         }
-        break
+        break;
       }
     }
-    lazySrcAttrs.forEach(attr => img.removeAttribute(attr))
-  })
+    lazySrcAttrs.forEach((attr) => img.removeAttribute(attr));
+  });
 }
 
 /**
@@ -278,33 +291,38 @@ function processLazyImages(container: HTMLElement): void {
  */
 function isLineNumberContainer(el: Element, codeLineCount: number): boolean {
   // 检查 ul/ol 的 li 子元素
-  if (el.tagName === 'UL' || el.tagName === 'OL') {
-    const items = el.querySelectorAll('li')
+  if (el.tagName === "UL" || el.tagName === "OL") {
+    const items = el.querySelectorAll("li");
     // 情况1: li 数量与代码行数匹配（空 li，用 CSS 生成行号）
     if (items.length >= 2 && items.length === codeLineCount) {
-      const allEmpty = Array.from(items).every(li => !li.textContent?.trim())
-      if (allEmpty) return true
+      const allEmpty = Array.from(items).every((li) => !li.textContent?.trim());
+      if (allEmpty) return true;
     }
     // 情况2: li 包含连续数字 1, 2, 3...
     if (items.length >= 2) {
-      let isSequential = true
+      let isSequential = true;
       items.forEach((li, i) => {
-        const num = parseInt(li.textContent?.trim() || '', 10)
-        if (num !== i + 1) isSequential = false
-      })
-      if (isSequential) return true
+        const num = parseInt(li.textContent?.trim() || "", 10);
+        if (num !== i + 1) isSequential = false;
+      });
+      if (isSequential) return true;
     }
   }
 
   // 检查元素内容是否是换行分隔的连续数字
-  const text = el.textContent?.trim() || ''
-  const lines = text.split(/[\n\r]+/).map(s => s.trim()).filter(Boolean)
+  const text = el.textContent?.trim() || "";
+  const lines = text
+    .split(/[\n\r]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
   if (lines.length >= 2) {
-    const allSequential = lines.every((line, i) => parseInt(line, 10) === i + 1)
-    if (allSequential) return true
+    const allSequential = lines.every(
+      (line, i) => parseInt(line, 10) === i + 1,
+    );
+    if (allSequential) return true;
   }
 
-  return false
+  return false;
 }
 
 /**
@@ -312,28 +330,29 @@ function isLineNumberContainer(el: Element, codeLineCount: number): boolean {
  * 使用结构检测而非硬编码 class 名
  */
 function removeLineNumberSiblings(pre: Element): void {
-  const parent = pre.parentElement
-  if (!parent) return
+  const parent = pre.parentElement;
+  if (!parent) return;
 
   // 计算代码行数（code 元素数量或文本行数）
-  const codeElements = pre.querySelectorAll('code')
-  const codeLineCount = codeElements.length > 1
-    ? codeElements.length
-    : (pre.textContent?.split('\n').length || 0)
+  const codeElements = pre.querySelectorAll("code");
+  const codeLineCount =
+    codeElements.length > 1
+      ? codeElements.length
+      : pre.textContent?.split("\n").length || 0;
 
   // 检查同级兄弟元素
-  Array.from(parent.children).forEach(sibling => {
+  Array.from(parent.children).forEach((sibling) => {
     if (sibling !== pre && isLineNumberContainer(sibling, codeLineCount)) {
-      sibling.remove()
+      sibling.remove();
     }
-  })
+  });
 }
 
 /**
  * 可作为代码行容器的标签
  * 这些标签通常用于包裹单行代码
  */
-const LINE_CONTAINER_TAGS = new Set(['CODE', 'DIV', 'SPAN', 'P', 'LI'])
+const LINE_CONTAINER_TAGS = new Set(["CODE", "DIV", "SPAN", "P", "LI"]);
 
 /**
  * 检查子元素是否构成有效的"多行结构"
@@ -349,25 +368,25 @@ const LINE_CONTAINER_TAGS = new Set(['CODE', 'DIV', 'SPAN', 'P', 'LI'])
  * - 子元素是 BR 等非容器标签
  */
 function isValidLineStructure(children: Element[]): boolean {
-  if (children.length < 2) return false
+  if (children.length < 2) return false;
 
-  const firstTag = children[0].tagName
+  const firstTag = children[0].tagName;
 
   // BR 不是有效的行容器
-  if (firstTag === 'BR') return false
+  if (firstTag === "BR") return false;
 
   // 检查是否全是同一类型的行容器标签
   if (LINE_CONTAINER_TAGS.has(firstTag)) {
-    return children.every(child => child.tagName === firstTag)
+    return children.every((child) => child.tagName === firstTag);
   }
 
   // 检查是否全是 display:block 的元素（某些高亮库用自定义标签）
-  const allBlock = children.every(child => {
-    const style = child.getAttribute('style') || ''
-    return style.includes('display:block') || style.includes('display: block')
-  })
+  const allBlock = children.every((child) => {
+    const style = child.getAttribute("style") || "";
+    return style.includes("display:block") || style.includes("display: block");
+  });
 
-  return allBlock
+  return allBlock;
 }
 
 /**
@@ -389,28 +408,28 @@ function isValidLineStructure(children: Element[]): boolean {
  * @returns 包含多行子元素的容器，或 null
  */
 function findLinesContainer(el: Element, depth: number): Element | null {
-  if (depth > 4) return null
+  if (depth > 4) return null;
 
-  const children = Array.from(el.children)
+  const children = Array.from(el.children);
 
   // 检查当前元素是否是有效的多行容器
   if (isValidLineStructure(children)) {
-    return el
+    return el;
   }
 
   // 只有一个子元素，继续向下递归
   if (children.length === 1) {
-    return findLinesContainer(children[0], depth + 1)
+    return findLinesContainer(children[0], depth + 1);
   }
 
-  return null
+  return null;
 }
 
 /**
  * 查找包含代码行的容器（入口函数）
  */
 function findCodeLinesContainer(pre: Element): Element | null {
-  return findLinesContainer(pre, 0)
+  return findLinesContainer(pre, 0);
 }
 
 /**
@@ -421,90 +440,97 @@ function findCodeLinesContainer(pre: Element): Element | null {
 function processCodeBlocks(container: HTMLElement): void {
   // 1. 先用特定选择器移除已知的行号元素
   removeElements(container, [
-    'ul.code-snippet__line-index',
-    '.code-snippet__line-index',
-    '.line-numbers-rows',  // Prism.js
-    '.hljs-ln-numbers',    // highlight.js
-    '.gutter',             // 通用
-  ])
+    "ul.code-snippet__line-index",
+    ".code-snippet__line-index",
+    ".line-numbers-rows", // Prism.js
+    ".hljs-ln-numbers", // highlight.js
+    ".gutter", // 通用
+  ]);
 
   // 简化 pre 标签
-  const pres = container.querySelectorAll('pre')
+  const pres = container.querySelectorAll("pre");
 
   pres.forEach((pre) => {
     try {
       // 跳过已经被 backupAndSimplifyCodeBlocks 处理过的代码块
-      if (pre.hasAttribute('data-code-simplified')) {
-        return
+      if (pre.hasAttribute("data-code-simplified")) {
+        return;
       }
 
       // 2. 再用结构检测移除未知的行号元素（通用方案）
-      removeLineNumberSiblings(pre)
+      removeLineNumberSiblings(pre);
 
       // 查找代码行容器
-      const linesContainer = findCodeLinesContainer(pre)
+      const linesContainer = findCodeLinesContainer(pre);
 
-      logger.debug('[processCodeBlocks] pre.innerHTML:', pre.innerHTML.slice(0, 200))
-      logger.debug('[processCodeBlocks] linesContainer:', linesContainer?.tagName, 'children:', linesContainer?.children.length)
+      logger.debug(
+        "[processCodeBlocks] pre.innerHTML:",
+        pre.innerHTML.slice(0, 200),
+      );
+      logger.debug(
+        "[processCodeBlocks] linesContainer:",
+        linesContainer?.tagName,
+        "children:",
+        linesContainer?.children.length,
+      );
 
-      let newHtml: string
+      let newHtml: string;
 
       if (linesContainer) {
         // 多行容器：每个子元素是一行代码
-        const lines: string[] = []
+        const lines: string[] = [];
         Array.from(linesContainer.children).forEach((child) => {
-          const text = child.textContent || ''
-          lines.push(escapeHtml(text))
-        })
-        newHtml = lines.join('\n')
+          const text = child.textContent || "";
+          lines.push(escapeHtml(text));
+        });
+        newHtml = lines.join("\n");
       } else {
         // 普通格式：用 innerText 提取（保留换行）
         // 注意：如果代码块未经 backupAndSimplifyCodeBlocks 预处理，
         // 在 detached DOM 上 innerText 可能无法正确处理 <br> 等
-        const text = pre.innerText || pre.textContent || ''
-        newHtml = `<code>${escapeHtml(text)}</code>`
+        const text = pre.innerText || pre.textContent || "";
+        newHtml = `<code>${escapeHtml(text)}</code>`;
       }
 
       // 清理：移除开头结尾空行
       newHtml = newHtml
-        .replace(/\r\n/g, '\n')
-        .replace(/\r/g, '\n')
-        .replace(/^\n+/, '')
-        .replace(/\n+$/, '')
+        .replace(/\r\n/g, "\n")
+        .replace(/\r/g, "\n")
+        .replace(/^\n+/, "")
+        .replace(/\n+$/, "");
 
       // 空代码块跳过
       if (!newHtml.trim()) {
-        pre.remove()
-        return
+        pre.remove();
+        return;
       }
 
-      pre.innerHTML = newHtml
-      pre.removeAttribute('class')
-      pre.removeAttribute('style')
-      pre.removeAttribute('data-lang')
+      pre.innerHTML = newHtml;
+      pre.removeAttribute("class");
+      pre.removeAttribute("style");
+      pre.removeAttribute("data-lang");
     } catch (e) {
-      logger.error('processCodeBlocks error:', e)
+      logger.error("processCodeBlocks error:", e);
     }
-  })
-
+  });
 }
 
 /**
  * 仅处理代码块（供 Reader 路径提前调用）
  */
 export function preprocessCodeBlocks(container: HTMLElement): void {
-  processCodeBlocks(container)
+  processCodeBlocks(container);
 }
 
 /**
  * 移除没有有效 src 的 img 标签（src 缺失或为空字符串）
  */
 function removeEmptyImages(container: HTMLElement): void {
-  container.querySelectorAll('img').forEach((img) => {
+  container.querySelectorAll("img").forEach((img) => {
     if (!img.src || img.src === window.location.href) {
-      img.remove()
+      img.remove();
     }
-  })
+  });
 }
 
 /**
@@ -512,20 +538,24 @@ function removeEmptyImages(container: HTMLElement): void {
  */
 function removeEmptyElements(container: HTMLElement): void {
   for (let i = 0; i < 3; i++) {
-    const emptyElements = container.querySelectorAll('p, div, section, span, figure')
-    let removed = 0
+    const emptyElements = container.querySelectorAll(
+      "p, div, section, span, figure",
+    );
+    let removed = 0;
 
     emptyElements.forEach((el) => {
-      const hasText = el.textContent?.trim()
-      const hasMedia = el.querySelector('img, video, audio, iframe, canvas, svg')
+      const hasText = el.textContent?.trim();
+      const hasMedia = el.querySelector(
+        "img, video, audio, iframe, canvas, svg",
+      );
 
       if (!hasText && !hasMedia) {
-        el.remove()
-        removed++
+        el.remove();
+        removed++;
       }
-    })
+    });
 
-    if (removed === 0) break
+    if (removed === 0) break;
   }
 }
 
@@ -533,45 +563,48 @@ function removeEmptyElements(container: HTMLElement): void {
  * 移除 data-* 属性
  */
 function removeDataAttributes(container: HTMLElement): void {
-  const allElements = container.querySelectorAll('*')
+  const allElements = container.querySelectorAll("*");
 
   allElements.forEach((el) => {
-    const attrs = Array.from(el.attributes)
+    const attrs = Array.from(el.attributes);
     attrs.forEach((attr) => {
-      if (attr.name.startsWith('data-') && attr.name !== 'data-src') {
-        el.removeAttribute(attr.name)
+      if (attr.name.startsWith("data-") && attr.name !== "data-src") {
+        el.removeAttribute(attr.name);
       }
-    })
-  })
+    });
+  });
 }
 
 /**
  * 移除图片的 srcset/sizes 属性
  */
-function removeImageAttributes(container: HTMLElement, config: PreprocessConfig): void {
-  const images = container.querySelectorAll('img')
+function removeImageAttributes(
+  container: HTMLElement,
+  config: PreprocessConfig,
+): void {
+  const images = container.querySelectorAll("img");
   images.forEach((img) => {
-    if (config.removeSrcset) img.removeAttribute('srcset')
-    if (config.removeSizes) img.removeAttribute('sizes')
-    img.removeAttribute('loading')
-    img.removeAttribute('decoding')
-  })
+    if (config.removeSrcset) img.removeAttribute("srcset");
+    if (config.removeSizes) img.removeAttribute("sizes");
+    img.removeAttribute("loading");
+    img.removeAttribute("decoding");
+  });
 }
 
 /**
  * 转换 section 标签
  */
-function convertSections(container: HTMLElement, targetTag: 'div' | 'p'): void {
-  const sections = container.querySelectorAll('section')
+function convertSections(container: HTMLElement, targetTag: "div" | "p"): void {
+  const sections = container.querySelectorAll("section");
   sections.forEach((section) => {
-    const newEl = document.createElement(targetTag)
-    newEl.innerHTML = section.innerHTML
+    const newEl = document.createElement(targetTag);
+    newEl.innerHTML = section.innerHTML;
     // 复制属性
     Array.from(section.attributes).forEach((attr) => {
-      newEl.setAttribute(attr.name, attr.value)
-    })
-    section.parentNode?.replaceChild(newEl, section)
-  })
+      newEl.setAttribute(attr.name, attr.value);
+    });
+    section.parentNode?.replaceChild(newEl, section);
+  });
 }
 
 /**
@@ -579,13 +612,13 @@ function convertSections(container: HTMLElement, targetTag: 'div' | 'p'): void {
  */
 function removeTrailingBr(container: HTMLElement): void {
   // 查找所有 p, div, section 元素
-  const elements = container.querySelectorAll('p, div, section')
+  const elements = container.querySelectorAll("p, div, section");
   elements.forEach((el) => {
     // 移除末尾的 br 标签
-    while (el.lastElementChild?.tagName === 'BR') {
-      el.lastElementChild.remove()
+    while (el.lastElementChild?.tagName === "BR") {
+      el.lastElementChild.remove();
     }
-  })
+  });
 }
 
 /**
@@ -598,21 +631,21 @@ function removeTrailingBr(container: HTMLElement): void {
  */
 function flattenNestedBold(container: HTMLElement): void {
   // b b / b strong / strong b / strong strong —— 任意后代关系都算嵌套
-  const selectors = ['b b', 'b strong', 'strong b', 'strong strong']
+  const selectors = ["b b", "b strong", "strong b", "strong strong"];
   for (let i = 0; i < 5; i++) {
-    let removed = 0
+    let removed = 0;
     for (const sel of selectors) {
       container.querySelectorAll(sel).forEach((inner) => {
-        const parent = inner.parentNode
-        if (!parent) return
+        const parent = inner.parentNode;
+        if (!parent) return;
         while (inner.firstChild) {
-          parent.insertBefore(inner.firstChild, inner)
+          parent.insertBefore(inner.firstChild, inner);
         }
-        parent.removeChild(inner)
-        removed++
-      })
+        parent.removeChild(inner);
+        removed++;
+      });
     }
-    if (removed === 0) break
+    if (removed === 0) break;
   }
 }
 
@@ -624,48 +657,49 @@ function flattenNestedBold(container: HTMLElement): void {
  */
 function unwrapSingleChildSpans(container: HTMLElement): void {
   for (let i = 0; i < 10; i++) {
-    let unwrapped = 0
+    let unwrapped = 0;
 
-    const allSpans = Array.from(container.querySelectorAll('span'))
+    const allSpans = Array.from(container.querySelectorAll("span"));
 
     for (const span of allSpans) {
-      if (!span.parentNode) continue // already detached
+      if (!span.parentNode) continue; // already detached
 
       // Skip empty spans (no children at all)
-      if (span.childNodes.length === 0) continue
+      if (span.childNodes.length === 0) continue;
 
       // If span has any direct non-whitespace text, keep it (mixed content)
       const hasDirectText = Array.from(span.childNodes).some(
-        (node) => node.nodeType === Node.TEXT_NODE && !!node.textContent?.trim()
-      )
-      if (hasDirectText) continue
+        (node) =>
+          node.nodeType === Node.TEXT_NODE && !!node.textContent?.trim(),
+      );
+      if (hasDirectText) continue;
 
       // Pure container span: lift all children up and remove the wrapper
-      const parent = span.parentNode
+      const parent = span.parentNode;
       while (span.firstChild) {
-        parent.insertBefore(span.firstChild, span)
+        parent.insertBefore(span.firstChild, span);
       }
-      parent.removeChild(span)
-      unwrapped++
+      parent.removeChild(span);
+      unwrapped++;
     }
 
-    if (unwrapped === 0) break
+    if (unwrapped === 0) break;
   }
 }
 
 function unwrapNestedFigures(container: HTMLElement): void {
   // 多次迭代处理多层嵌套
   for (let i = 0; i < 5; i++) {
-    const nestedFigures = container.querySelectorAll('figure > figure')
-    if (nestedFigures.length === 0) break
+    const nestedFigures = container.querySelectorAll("figure > figure");
+    if (nestedFigures.length === 0) break;
 
     nestedFigures.forEach((innerFigure) => {
-      const outerFigure = innerFigure.parentElement
-      if (outerFigure?.tagName === 'FIGURE') {
+      const outerFigure = innerFigure.parentElement;
+      if (outerFigure?.tagName === "FIGURE") {
         // 用内层 figure 替换外层
-        outerFigure.parentNode?.replaceChild(innerFigure, outerFigure)
+        outerFigure.parentNode?.replaceChild(innerFigure, outerFigure);
       }
-    })
+    });
   }
 }
 
@@ -676,28 +710,29 @@ function unwrapNestedFigures(container: HTMLElement): void {
 function unwrapSingleChildContainers(container: HTMLElement): void {
   // 多次迭代处理嵌套
   for (let i = 0; i < 5; i++) {
-    let unwrapped = 0
+    let unwrapped = 0;
 
     // 查找只有单个子元素的 div
-    const divs = container.querySelectorAll('div')
+    const divs = container.querySelectorAll("div");
     divs.forEach((div) => {
       // 检查是否只有单个元素子节点（忽略空白文本节点）
       const children = Array.from(div.childNodes).filter(
-        (node) => node.nodeType === Node.ELEMENT_NODE ||
-          (node.nodeType === Node.TEXT_NODE && node.textContent?.trim())
-      )
+        (node) =>
+          node.nodeType === Node.ELEMENT_NODE ||
+          (node.nodeType === Node.TEXT_NODE && node.textContent?.trim()),
+      );
 
       if (children.length === 1 && children[0].nodeType === Node.ELEMENT_NODE) {
-        const child = children[0] as HTMLElement
+        const child = children[0] as HTMLElement;
         // 只解包特定标签
-        if (['DIV', 'ARTICLE', 'P', 'SECTION'].includes(child.tagName)) {
-          div.parentNode?.replaceChild(child, div)
-          unwrapped++
+        if (["DIV", "ARTICLE", "P", "SECTION"].includes(child.tagName)) {
+          div.parentNode?.replaceChild(child, div);
+          unwrapped++;
         }
       }
-    })
+    });
 
-    if (unwrapped === 0) break
+    if (unwrapped === 0) break;
   }
 }
 
@@ -710,81 +745,83 @@ function compactHtml(container: HTMLElement): void {
   const walker = document.createTreeWalker(
     container,
     NodeFilter.SHOW_TEXT,
-    null
-  )
+    null,
+  );
 
-  const nodesToRemove: Text[] = []
-  let node: Text | null
+  const nodesToRemove: Text[] = [];
+  let node: Text | null;
 
   while ((node = walker.nextNode() as Text | null)) {
     // 如果文本节点只包含空白，且前后都是元素节点，则标记为移除
     if (node.textContent && /^\s+$/.test(node.textContent)) {
-      const prev = node.previousSibling
-      const next = node.nextSibling
-      const parent = node.parentNode
+      const prev = node.previousSibling;
+      const next = node.nextSibling;
+      const parent = node.parentNode;
 
       // 在块级元素之间的空白可以移除
-      if (parent && parent.nodeName !== 'PRE' && parent.nodeName !== 'CODE') {
-        if ((!prev || prev.nodeType === Node.ELEMENT_NODE) &&
-            (!next || next.nodeType === Node.ELEMENT_NODE)) {
-          nodesToRemove.push(node)
+      if (parent && parent.nodeName !== "PRE" && parent.nodeName !== "CODE") {
+        if (
+          (!prev || prev.nodeType === Node.ELEMENT_NODE) &&
+          (!next || next.nodeType === Node.ELEMENT_NODE)
+        ) {
+          nodesToRemove.push(node);
         }
       }
     }
   }
 
-  nodesToRemove.forEach((n) => n.remove())
+  nodesToRemove.forEach((n) => n.remove());
 }
 
 /**
  * 移除空行（只含 br 或空白的段落）
  */
 function removeEmptyLines(container: HTMLElement): void {
-  const elements = container.querySelectorAll('p, section')
+  const elements = container.querySelectorAll("p, section");
   elements.forEach((el) => {
     // 检查是否只包含空白或 br
     const hasOnlyBrOrWhitespace = Array.from(el.childNodes).every((node) => {
       if (node.nodeType === Node.TEXT_NODE) {
-        return !node.textContent?.trim()
+        return !node.textContent?.trim();
       }
       if (node.nodeType === Node.ELEMENT_NODE) {
-        return (node as Element).tagName === 'BR'
+        return (node as Element).tagName === "BR";
       }
-      return true
-    })
+      return true;
+    });
 
     if (hasOnlyBrOrWhitespace) {
-      el.remove()
+      el.remove();
     }
-  })
+  });
 }
 
 /**
  * 移除空 div（只含 br 或空白，但保留含图片的）
  */
 function removeEmptyDivs(container: HTMLElement): void {
-  const divs = container.querySelectorAll('div')
+  const divs = container.querySelectorAll("div");
   divs.forEach((div) => {
     // 如果包含图片/视频等媒体元素，保留
-    if (div.querySelector('img, video, audio, canvas, svg, iframe')) {
-      return
+    if (div.querySelector("img, video, audio, canvas, svg, iframe")) {
+      return;
     }
 
     // 检查是否只包含空白或 br
     const hasOnlyBrOrWhitespace = Array.from(div.childNodes).every((node) => {
       if (node.nodeType === Node.TEXT_NODE) {
-        return !node.textContent?.trim()
+        return !node.textContent?.trim();
       }
       if (node.nodeType === Node.ELEMENT_NODE) {
-        return (node as Element).tagName === 'BR'
+        return (node as Element).tagName === "BR";
       }
-      return true
-    })
+      return true;
+    });
 
     if (hasOnlyBrOrWhitespace) {
-      div.remove()
+      div.remove();
     }
-  })
+  });
 }
 
 /**
@@ -793,39 +830,39 @@ function removeEmptyDivs(container: HTMLElement): void {
 function removeNestedEmptyContainers(container: HTMLElement): void {
   // 多次迭代处理嵌套
   for (let i = 0; i < 5; i++) {
-    let removed = 0
+    let removed = 0;
 
-    const elements = container.querySelectorAll('div, section, article, span')
+    const elements = container.querySelectorAll("div, section, article, span");
     elements.forEach((el) => {
       // 如果包含媒体元素，保留
-      if (el.querySelector('img, video, audio, canvas, svg, iframe')) {
-        return
+      if (el.querySelector("img, video, audio, canvas, svg, iframe")) {
+        return;
       }
 
       // 检查是否为空或只包含空白
-      const text = el.textContent?.trim() || ''
-      const hasChildren = el.children.length > 0
+      const text = el.textContent?.trim() || "";
+      const hasChildren = el.children.length > 0;
 
       // 完全空的容器
       if (!text && !hasChildren) {
-        el.remove()
-        removed++
-        return
+        el.remove();
+        removed++;
+        return;
       }
 
       // 只包含 br 的容器
       if (!text && hasChildren) {
         const allBr = Array.from(el.children).every(
-          (child) => child.tagName === 'BR'
-        )
+          (child) => child.tagName === "BR",
+        );
         if (allBr) {
-          el.remove()
-          removed++
+          el.remove();
+          removed++;
         }
       }
-    })
+    });
 
-    if (removed === 0) break
+    if (removed === 0) break;
   }
 }
 
@@ -834,11 +871,11 @@ function removeNestedEmptyContainers(container: HTMLElement): void {
  */
 function escapeHtml(text: string): string {
   return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;')
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 // ============ 兼容旧 API ============
@@ -851,25 +888,36 @@ function escapeHtml(text: string): string {
  */
 export function preprocessContentDOM(container: HTMLElement): void {
   // 执行默认的全部预处理（不包含平台特定处理）
-  removeComments(container)
-  removeElements(container, ['iframe', 'script', 'style', 'noscript'])
-  removeElements(container, ['mpprofile', 'qqmusic', 'mpvoice', 'mpcps', 'mp-miniprogram', 'mp-common-product'])
-  processSvgImages(container)
-  processLazyImages(container)
-  processCodeBlocks(container)
-  removeEmptyElements(container)
-  removeDataAttributes(container)
-  removeImageAttributes(container, { outputFormat: 'html', removeSrcset: true, removeSizes: true })
+  removeComments(container);
+  removeElements(container, ["iframe", "script", "style", "noscript"]);
+  removeElements(container, [
+    "mpprofile",
+    "qqmusic",
+    "mpvoice",
+    "mpcps",
+    "mp-miniprogram",
+    "mp-common-product",
+  ]);
+  processSvgImages(container);
+  processLazyImages(container);
+  processCodeBlocks(container);
+  removeEmptyElements(container);
+  removeDataAttributes(container);
+  removeImageAttributes(container, {
+    outputFormat: "html",
+    removeSrcset: true,
+    removeSizes: true,
+  });
 }
 
 /**
  * @deprecated 使用 preprocessForPlatform 代替
  */
 export function preprocessContentString(html: string): string {
-  const tempDiv = document.createElement('div')
-  tempDiv.innerHTML = html
-  preprocessContentDOM(tempDiv)
-  return tempDiv.innerHTML
+  const tempDiv = document.createElement("div");
+  tempDiv.innerHTML = html;
+  preprocessContentDOM(tempDiv);
+  return tempDiv.innerHTML;
 }
 
 // ============ 代码块 Backup/Restore (用于原始 DOM 处理) ============
@@ -878,8 +926,8 @@ export function preprocessContentString(html: string): string {
  * 元素备份信息
  */
 export interface ElementBackup {
-  element: Element
-  originalHTML: string
+  element: Element;
+  originalHTML: string;
 }
 
 /**
@@ -890,89 +938,97 @@ export interface ElementBackup {
  *
  * @param root 要处理的根元素（默认为 document.body）
  */
-export function backupAndSimplifyCodeBlocks(root: Element = document.body): ElementBackup[] {
-  const backups: ElementBackup[] = []
+export function backupAndSimplifyCodeBlocks(
+  root: Element = document.body,
+): ElementBackup[] {
+  const backups: ElementBackup[] = [];
 
   // 行号元素选择器（用于临时隐藏）
   const GUTTER_SELECTORS = [
-    '.gutter',
-    '.line-numbers-rows',
-    '.hljs-ln-numbers',
-    '.code-snippet__line-index',
-    'ul.code-snippet__line-index',
+    ".gutter",
+    ".line-numbers-rows",
+    ".hljs-ln-numbers",
+    ".code-snippet__line-index",
+    "ul.code-snippet__line-index",
     '[class*="line-number"]',
     '[class*="lineNumber"]',
-  ].join(', ')
+  ].join(", ");
 
-  root.querySelectorAll('pre').forEach((pre) => {
+  root.querySelectorAll("pre").forEach((pre) => {
     try {
       // 保存原始 HTML
-      const originalHTML = pre.innerHTML
+      const originalHTML = pre.innerHTML;
 
       // 临时隐藏行号元素（不删除，因为要恢复）
-      const gutterEls = pre.querySelectorAll(GUTTER_SELECTORS)
-      const gutterDisplays: string[] = []
+      const gutterEls = pre.querySelectorAll(GUTTER_SELECTORS);
+      const gutterDisplays: string[] = [];
       gutterEls.forEach((el, i) => {
-        gutterDisplays[i] = (el as HTMLElement).style.display
-        ;(el as HTMLElement).style.display = 'none'
-      })
+        gutterDisplays[i] = (el as HTMLElement).style.display;
+        (el as HTMLElement).style.display = "none";
+      });
 
       // 使用结构检测移除未知的行号元素（临时）
       // 注意：这里不能调用 removeLineNumberSiblings 因为会修改 DOM
       // 我们只是临时隐藏，所以跳过这步
 
       // 查找代码行容器（与 processCodeBlocks 相同的逻辑）
-      const linesContainer = findCodeLinesContainer(pre)
+      const linesContainer = findCodeLinesContainer(pre);
 
-      let cleanedText: string
+      let cleanedText: string;
 
       if (linesContainer) {
         // 多行容器：每个子元素是一行代码
-        const lines: string[] = []
+        const lines: string[] = [];
         Array.from(linesContainer.children).forEach((child) => {
-          const text = child.textContent || ''
-          lines.push(text)
-        })
-        cleanedText = lines.join('\n')
+          const text = child.textContent || "";
+          lines.push(text);
+        });
+        cleanedText = lines.join("\n");
       } else {
         // 普通格式：用 innerText 提取（在真实 DOM 上能正确处理 br 等）
-        const code = pre.querySelector('code')
-        const targetEl = (code || pre) as HTMLElement
-        cleanedText = targetEl.innerText || ''
+        const code = pre.querySelector("code");
+        const targetEl = (code || pre) as HTMLElement;
+        cleanedText = targetEl.innerText || "";
       }
 
       // 恢复行号显示
       gutterEls.forEach((el, i) => {
-        ;(el as HTMLElement).style.display = gutterDisplays[i]
-      })
+        (el as HTMLElement).style.display = gutterDisplays[i];
+      });
 
       // 清理首尾空白
       cleanedText = cleanedText
-        .replace(/\r\n/g, '\n')
-        .replace(/\r/g, '\n')
-        .replace(/^\n+/, '')
-        .replace(/\n+$/, '')
+        .replace(/\r\n/g, "\n")
+        .replace(/\r/g, "\n")
+        .replace(/^\n+/, "")
+        .replace(/\n+$/, "");
 
       // 跳过空代码块
-      if (!cleanedText.trim()) return
+      if (!cleanedText.trim()) return;
 
-      logger.debug('[backupAndSimplifyCodeBlocks] original:', originalHTML.slice(0, 100))
-      logger.debug('[backupAndSimplifyCodeBlocks] cleaned text:', cleanedText.slice(0, 100))
+      logger.debug(
+        "[backupAndSimplifyCodeBlocks] original:",
+        originalHTML.slice(0, 100),
+      );
+      logger.debug(
+        "[backupAndSimplifyCodeBlocks] cleaned text:",
+        cleanedText.slice(0, 100),
+      );
 
       backups.push({
         element: pre,
         originalHTML: originalHTML,
-      })
+      });
 
       // 替换为纯文本，添加标记表示已处理
-      pre.innerHTML = `<code>${escapeHtml(cleanedText)}</code>`
-      pre.setAttribute('data-code-simplified', 'true')
+      pre.innerHTML = `<code>${escapeHtml(cleanedText)}</code>`;
+      pre.setAttribute("data-code-simplified", "true");
     } catch (e) {
-      logger.error('[backupAndSimplifyCodeBlocks] error:', e)
+      logger.error("[backupAndSimplifyCodeBlocks] error:", e);
     }
-  })
+  });
 
-  return backups
+  return backups;
 }
 
 /**
@@ -980,6 +1036,6 @@ export function backupAndSimplifyCodeBlocks(root: Element = document.body): Elem
  */
 export function restoreCodeBlocks(backups: ElementBackup[]): void {
   backups.forEach(({ element, originalHTML }) => {
-    element.innerHTML = originalHTML
-  })
+    element.innerHTML = originalHTML;
+  });
 }

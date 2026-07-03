@@ -1,86 +1,92 @@
 /**
  * 大鱼号适配器
  */
-import { CodeAdapter, type ImageUploadResult } from '../code-adapter'
-import type { Article, AuthResult, SyncResult, PlatformMeta } from '../../types'
-import type { PublishOptions } from '../types'
-import { createLogger } from '../../lib/logger'
+import { CodeAdapter, type ImageUploadResult } from "../code-adapter";
+import type {
+  Article,
+  AuthResult,
+  SyncResult,
+  PlatformMeta,
+} from "../../types";
+import type { PublishOptions } from "../types";
+import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
 
-const logger = createLogger('DaYu')
+const logger = createLogger("DaYu");
 
 interface DaYuMeta {
-  utoken: string
-  uploadSign: string
-  uid: string
-  title: string
-  avatar: string
+  utoken: string;
+  uploadSign: string;
+  uid: string;
+  title: string;
+  avatar: string;
 }
 
 export class DaYuAdapter extends CodeAdapter {
   readonly meta: PlatformMeta = {
-    id: 'dayu',
-    name: '大鱼号',
-    icon: 'https://image.uc.cn/s/uae/g/1v/images/index/favicon.ico',
-    homepage: 'https://mp.dayu.com/dashboard/account/profile',
-    capabilities: ['article', 'draft', 'image_upload'],
-  }
+    id: "dayu",
+    name: "大鱼号",
+    icon: "https://image.uc.cn/s/uae/g/1v/images/index/favicon.ico",
+    homepage: "https://mp.dayu.com/dashboard/account/profile",
+    capabilities: ["article", "draft", "image_upload"],
+  };
 
   /** 预处理配置: 大鱼号使用 HTML 格式 */
   readonly preprocessConfig = {
-    outputFormat: 'html' as const,
-  }
+    outputFormat: "html" as const,
+  };
 
-  private cacheMeta: DaYuMeta | null = null
-  private uploadedImages: Array<{ org_url: string; url: string }> = []
+  private cacheMeta: DaYuMeta | null = null;
+  private uploadedImages: Array<{ org_url: string; url: string }> = [];
 
   /** 大鱼号 API 需要的 Header 规则 */
   private readonly HEADER_RULES = [
     {
-      urlFilter: '*://mp.dayu.com/*',
+      urlFilter: "*://mp.dayu.com/*",
       headers: {
-        'Origin': 'https://mp.dayu.com',
-        'Referer': 'https://mp.dayu.com/',
+        Origin: "https://mp.dayu.com",
+        Referer: "https://mp.dayu.com/",
       },
-      resourceTypes: ['xmlhttprequest'],
+      resourceTypes: ["xmlhttprequest"],
     },
     {
-      urlFilter: '*://ns.dayu.com/*',
+      urlFilter: "*://ns.dayu.com/*",
       headers: {
-        'Origin': 'https://mp.dayu.com',
-        'Referer': 'https://mp.dayu.com/',
+        Origin: "https://mp.dayu.com",
+        Referer: "https://mp.dayu.com/",
       },
-      resourceTypes: ['xmlhttprequest'],
+      resourceTypes: ["xmlhttprequest"],
     },
-  ]
+  ];
 
   async checkAuth(): Promise<AuthResult> {
     try {
       const response = await this.runtime.fetch(
-        'https://mp.dayu.com/dashboard/index',
+        "https://mp.dayu.com/dashboard/index",
         {
-          method: 'GET',
-          credentials: 'include',
-        }
-      )
+          method: "GET",
+          credentials: "include",
+        },
+      );
 
-      const pageHtml = await response.text()
-      const markStr = 'var globalConfig = '
-      const authIndex = pageHtml.indexOf(markStr)
+      const pageHtml = await response.text();
+      const markStr = "var globalConfig = ";
+      const authIndex = pageHtml.indexOf(markStr);
 
       if (authIndex === -1) {
-        return { isAuthenticated: false }
+        return { isAuthenticated: false };
       }
 
       const authTokenStr = pageHtml.substring(
         authIndex + markStr.length,
-        pageHtml.indexOf('var G = {', authIndex)
-      )
+        pageHtml.indexOf("var G = {", authIndex),
+      );
 
       // 使用 JSON 解析代替 eval
-      const pageConfig = this.parseGlobalConfig(authTokenStr)
+      const pageConfig = this.parseGlobalConfig(authTokenStr);
 
       if (!pageConfig || !pageConfig.utoken) {
-        return { isAuthenticated: false }
+        return { isAuthenticated: false };
       }
 
       this.cacheMeta = {
@@ -88,20 +94,21 @@ export class DaYuAdapter extends CodeAdapter {
         uploadSign: pageConfig.nsImageUploadSign,
         uid: pageConfig.wmid,
         title: pageConfig.weMediaName,
-        avatar: pageConfig.wmAvator?.indexOf('http') > -1
-          ? pageConfig.wmAvator
-          : pageConfig.wmAvator?.replace('//', 'https://') || '',
-      }
+        avatar:
+          pageConfig.wmAvator?.indexOf("http") > -1
+            ? pageConfig.wmAvator
+            : pageConfig.wmAvator?.replace("//", "https://") || "",
+      };
 
       return {
         isAuthenticated: true,
         userId: this.cacheMeta.uid,
         username: this.cacheMeta.title,
         avatar: this.cacheMeta.avatar,
-      }
+      };
     } catch (error) {
-      logger.debug('checkAuth: not logged in -', error)
-      return { isAuthenticated: false, error: (error as Error).message }
+      logger.debug("checkAuth: not logged in -", error);
+      return { isAuthenticated: false, error: (error as Error).message };
     }
   }
 
@@ -112,9 +119,9 @@ export class DaYuAdapter extends CodeAdapter {
     try {
       // 尝试清理并解析 JavaScript 对象字面量
       // 移除末尾的分号和空白
-      let cleaned = configStr.trim()
-      if (cleaned.endsWith(';')) {
-        cleaned = cleaned.slice(0, -1)
+      let cleaned = configStr.trim();
+      if (cleaned.endsWith(";")) {
+        cleaned = cleaned.slice(0, -1);
       }
 
       // 尝试用 JSON 解析（如果格式兼容）
@@ -122,13 +129,13 @@ export class DaYuAdapter extends CodeAdapter {
       const jsonStr = cleaned
         .replace(/'/g, '"')
         .replace(/(\w+):/g, '"$1":')
-        .replace(/,\s*}/g, '}')
-        .replace(/,\s*]/g, ']')
+        .replace(/,\s*}/g, "}")
+        .replace(/,\s*]/g, "]");
 
-      return JSON.parse(jsonStr)
+      return JSON.parse(jsonStr);
     } catch {
       // 如果 JSON 解析失败，使用正则提取关键字段
-      const result: Record<string, string> = {}
+      const result: Record<string, string> = {};
 
       const patterns: Record<string, RegExp> = {
         utoken: /utoken['":\s]+['"]([^'"]+)['"]/,
@@ -136,101 +143,139 @@ export class DaYuAdapter extends CodeAdapter {
         wmid: /wmid['":\s]+['"]([^'"]+)['"]/,
         weMediaName: /weMediaName['":\s]+['"]([^'"]+)['"]/,
         wmAvator: /wmAvator['":\s]+['"]([^'"]+)['"]/,
-      }
+      };
 
       for (const [key, pattern] of Object.entries(patterns)) {
-        const match = configStr.match(pattern)
+        const match = configStr.match(pattern);
         if (match) {
-          result[key] = match[1]
+          result[key] = match[1];
         }
       }
 
-      return Object.keys(result).length > 0 ? result : null
+      return Object.keys(result).length > 0 ? result : null;
     }
   }
 
-  async publish(article: Article, options?: PublishOptions): Promise<SyncResult> {
+  async publish(
+    article: Article,
+    options?: PublishOptions,
+  ): Promise<SyncResult> {
     return this.withHeaderRules(this.HEADER_RULES, async () => {
-      logger.info('Starting publish...')
+      logger.info("Starting publish...");
 
       // 重置上传图片列表
-      this.uploadedImages = []
+      this.uploadedImages = [];
 
       // 1. 确保已登录
       if (!this.cacheMeta) {
-        const auth = await this.checkAuth()
+        const auth = await this.checkAuth();
         if (!auth.isAuthenticated) {
-          throw new Error('请先登录大鱼号')
+          throw new Error("请先登录大鱼号");
         }
       }
 
-      // Use pre-processed HTML content directly
-      let content = article.html || ''
+      // 使用文章处理器处理内容
+      const processed = ArticleProcessor.processHtmlContent(article, {
+        supportsTags: false, // 大鱼号不支持标签字段
+        supportsSummary: false, // 大鱼号不支持摘要字段
+        supportsCategory: false, // 大鱼号不支持分类
+        supportsCover: true, // 大鱼号支持封面
+        supportsAuthor: true, // 大鱼号支持作者字段
+      });
 
-      // Process images
-      content = await this.processImages(
-        content,
+      let finalContent = await this.processImages(
+        processed.content,
         (src) => this.uploadImageByUrl(src),
         {
-          skipPatterns: ['dayu.com', 'uc.cn'],
+          skipPatterns: ["dayu.com", "uc.cn"],
           onProgress: options?.onImageProgress,
+        },
+      );
+
+      // 处理封面图片
+      let coverImg = "";
+      if (processed.cover) {
+        try {
+          logger.debug(`Uploading cover image: ${processed.cover}`);
+          const coverUploadResult = await this.uploadImageByUrl(
+            processed.cover,
+          );
+          // 查找上传的封面图片
+          const coverImage = this.uploadedImages.find(
+            (img) => img.url === coverUploadResult.url,
+          );
+          if (coverImage) {
+            coverImg = coverImage.org_url;
+            logger.debug(`Cover uploaded successfully: ${coverImg}`);
+          }
+        } catch (error) {
+          logger.error(`Failed to upload cover image:`, error);
+          // 如果封面上传失败，尝试使用第一张上传的图片作为封面
+          if (this.uploadedImages.length > 0) {
+            coverImg = this.uploadedImages[0].org_url;
+            logger.warn(`Using first uploaded image as cover: ${coverImg}`);
+          }
         }
-      )
-
-      // 5. 获取封面图
-      const coverImg = this.uploadedImages.length > 0
-        ? this.uploadedImages[0].org_url
-        : ''
-
-      // 6. 保存草稿
-      const formData = new URLSearchParams()
-      formData.append('title', article.title)
-      formData.append('content', content)
-      formData.append('author', this.cacheMeta!.title)
-      formData.append('coverImg', coverImg)
-      formData.append('article_type', '1')
-      formData.append('utoken', this.cacheMeta!.utoken)
-      formData.append('cover_from', 'auto')
-
-      const response = await this.runtime.fetch(
-        'https://mp.dayu.com/dashboard/save-draft',
-        {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'utoken': this.cacheMeta!.utoken,
-          },
-          body: formData,
-        }
-      )
-
-      const res = await response.json() as {
-        error?: string
-        data?: { _id: string }
+      } else if (this.uploadedImages.length > 0) {
+        // 如果没有指定封面，使用第一张上传的图片作为封面
+        coverImg = this.uploadedImages[0].org_url;
+        logger.debug(`Using first uploaded image as cover: ${coverImg}`);
       }
 
-      logger.debug('Save response:', res)
+      // 保存草稿
+      const formData = new URLSearchParams();
+      formData.append("title", processed.title);
+      formData.append("content", finalContent);
+      formData.append("author", processed.author || this.cacheMeta!.title);
+      formData.append("coverImg", coverImg);
+      formData.append(
+        "article_type",
+        processed.articleType === "original" ? "1" : "2",
+      );
+      formData.append("utoken", this.cacheMeta!.utoken);
+      formData.append("cover_from", "auto");
+
+      const response = await this.runtime.fetch(
+        "https://mp.dayu.com/dashboard/save-draft",
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            utoken: this.cacheMeta!.utoken,
+          },
+          body: formData,
+        },
+      );
+
+      const res = (await response.json()) as {
+        error?: string;
+        data?: { _id: string };
+      };
+
+      logger.debug("Save response:", res);
 
       if (res.error) {
-        throw new Error(res.error)
+        throw new Error(res.error);
       }
 
       if (!res.data?._id) {
-        throw new Error('保存草稿失败')
+        throw new Error("保存草稿失败");
       }
 
-      const postId = res.data._id
-      const draftUrl = `https://mp.dayu.com/dashboard/article/write?draft_id=${postId}`
+      const postId = res.data._id;
+      const draftUrl = `https://mp.dayu.com/dashboard/article/write?draft_id=${postId}`;
 
       return this.createResult(true, {
         postId: postId,
         postUrl: draftUrl,
         draftOnly: options?.draftOnly ?? true,
-      })
-    }).catch((error) => this.createResult(false, {
-      error: (error as Error).message,
-    }))
+      });
+    }).catch((error) =>
+      this.createResult(false, {
+        error: (error as Error).message,
+      }),
+    );
   }
 
   /**
@@ -238,61 +283,61 @@ export class DaYuAdapter extends CodeAdapter {
    */
   protected async uploadImageByUrl(src: string): Promise<ImageUploadResult> {
     if (!this.cacheMeta) {
-      throw new Error('未登录')
+      throw new Error("未登录");
     }
 
     // 1. 下载图片
-    const imageResponse = await fetch(src)
+    const imageResponse = await fetch(src);
     if (!imageResponse.ok) {
-      throw new Error('图片下载失败: ' + src)
+      throw new Error("图片下载失败: " + src);
     }
-    const imageBlob = await imageResponse.blob()
+    const imageBlob = await imageResponse.blob();
 
     // 2. 构建上传 URL
-    const uploadUrl = `https://ns.dayu.com/article/imageUpload?appid=website&fromMaterial=0&wmid=${this.cacheMeta.uid}&wmname=${encodeURIComponent(this.cacheMeta.title)}&sign=${this.cacheMeta.uploadSign}`
+    const uploadUrl = `https://ns.dayu.com/article/imageUpload?appid=website&fromMaterial=0&wmid=${this.cacheMeta.uid}&wmname=${encodeURIComponent(this.cacheMeta.title)}&sign=${this.cacheMeta.uploadSign}`;
 
     // 3. 上传图片
-    const formData = new FormData()
-    const fileName = `${Date.now()}.jpg`
-    formData.append('upfile', imageBlob, fileName)
-    formData.append('type', imageBlob.type || 'image/jpeg')
-    formData.append('id', 'WU_FILE_1')
-    formData.append('fileid', `uploadm-${Math.floor(Math.random() * 1000000)}`)
-    formData.append('name', fileName)
-    formData.append('lastModifiedDate', new Date().toString())
-    formData.append('size', String(imageBlob.size))
+    const formData = new FormData();
+    const fileName = `${Date.now()}.jpg`;
+    formData.append("upfile", imageBlob, fileName);
+    formData.append("type", imageBlob.type || "image/jpeg");
+    formData.append("id", "WU_FILE_1");
+    formData.append("fileid", `uploadm-${Math.floor(Math.random() * 1000000)}`);
+    formData.append("name", fileName);
+    formData.append("lastModifiedDate", new Date().toString());
+    formData.append("size", String(imageBlob.size));
 
     const uploadResponse = await this.runtime.fetch(uploadUrl, {
-      method: 'POST',
-      credentials: 'include',
+      method: "POST",
+      credentials: "include",
       body: formData,
-    })
+    });
 
-    const res = await uploadResponse.json() as {
+    const res = (await uploadResponse.json()) as {
       data?: {
         imgInfo?: {
-          org_url: string
-          url: string
-        }
-      }
-    }
+          org_url: string;
+          url: string;
+        };
+      };
+    };
 
-    logger.debug('Image upload response:', res)
+    logger.debug("Image upload response:", res);
 
     if (!res.data?.imgInfo?.url) {
-      throw new Error('图片上传失败')
+      throw new Error("图片上传失败");
     }
 
     const image = {
       org_url: res.data.imgInfo.org_url,
       url: res.data.imgInfo.url,
-    }
+    };
 
     // 保存上传的图片信息（用于封面）
-    this.uploadedImages.push(image)
+    this.uploadedImages.push(image);
 
     return {
       url: image.url,
-    }
+    };
   }
 }

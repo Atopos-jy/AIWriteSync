@@ -1,193 +1,164 @@
 /**
- * B站适配器
+ * B站适配器 - 增强版：全字段逻辑同步
  */
-import { CodeAdapter, type ImageUploadResult } from '../code-adapter'
-import type { Article, AuthResult, SyncResult, PlatformMeta } from '../../types'
-import type { PublishOptions } from '../types'
-import { createLogger } from '../../lib/logger'
-
-const logger = createLogger('Bilibili')
-
-interface BilibiliUserInfo {
-  mid: number
-  uname: string
-  face: string
-  isLogin: boolean
-}
+import { CodeAdapter, type ImageUploadResult } from "../code-adapter";
+import type {
+  Article,
+  AuthResult,
+  SyncResult,
+  PlatformMeta,
+} from "../../types";
+import type { PublishOptions } from "../types";
+import { ArticleProcessor } from "../article-processor";
 
 export class BilibiliAdapter extends CodeAdapter {
   readonly meta: PlatformMeta = {
-    id: 'bilibili',
-    name: '哔哩哔哩',
-    icon: 'https://www.bilibili.com/favicon.ico',
-    homepage: 'https://member.bilibili.com/platform/upload/text',
-    capabilities: ['article', 'draft', 'image_upload'],
-  }
+    id: "bilibili",
+    name: "哔哩哔哩",
+    icon: "https://www.bilibili.com/favicon.ico",
+    homepage: "https://member.bilibili.com/platform/upload/text",
+    capabilities: ["article", "draft", "image_upload", "cover"],
+  };
 
-  /** 预处理配置: B站使用 HTML，移除外链 */
   readonly preprocessConfig = {
-    outputFormat: 'html' as const,
+    outputFormat: "html" as const,
     removeLinks: true,
-  }
+  };
 
-  private userInfo: BilibiliUserInfo | null = null
-  private csrf: string = ''
+  private userInfo: any = null;
+  private csrf: string = "";
 
-  /** B站 API 需要的 Header 规则 */
   private readonly HEADER_RULES = [
     {
-      urlFilter: '*://api.bilibili.com/*',
+      urlFilter: "*://api.bilibili.com/*",
       headers: {
-        'Origin': 'https://member.bilibili.com',
-        'Referer': 'https://member.bilibili.com/',
+        Origin: "https://member.bilibili.com",
+        Referer: "https://member.bilibili.com/",
       },
-      resourceTypes: ['xmlhttprequest'],
+      resourceTypes: ["xmlhttprequest"],
     },
-  ]
+  ];
 
   async checkAuth(): Promise<AuthResult> {
     try {
-      const res = await this.get<{
-        code: number
-        data?: BilibiliUserInfo
-      }>('https://api.bilibili.com/x/web-interface/nav?build=0&mobi_app=web')
-
-      logger.debug('checkAuth response:', res)
-
+      const res = await this.get<{ code: number; data?: any }>(
+        "https://api.bilibili.com/x/web-interface/nav",
+      );
       if (res.code === 0 && res.data?.isLogin) {
-        this.userInfo = res.data
-        await this.fetchCsrf()
-
+        this.userInfo = res.data;
+        if (this.runtime.getCookie) {
+          this.csrf =
+            (await this.runtime.getCookie(".bilibili.com", "bili_jct")) || "";
+        }
         return {
           isAuthenticated: true,
           userId: String(res.data.mid),
           username: res.data.uname,
           avatar: res.data.face,
-        }
+        };
       }
-
-      return { isAuthenticated: false }
+      return { isAuthenticated: false };
     } catch (error) {
-      logger.debug('checkAuth: not logged in -', error)
-      return { isAuthenticated: false, error: (error as Error).message }
+      return { isAuthenticated: false, error: (error as Error).message };
     }
   }
 
-  private async fetchCsrf(): Promise<void> {
-    try {
-      if (this.runtime.getCookie) {
-        const value = await this.runtime.getCookie('.bilibili.com', 'bili_jct')
-        this.csrf = value || ''
-      }
-      logger.debug('CSRF token:', this.csrf ? 'obtained' : 'not found')
-    } catch (e) {
-      logger.error('Failed to get CSRF:', e)
-    }
-  }
-
-  async publish(article: Article, options?: PublishOptions): Promise<SyncResult> {
+  async publish(
+    article: Article,
+    options?: PublishOptions,
+  ): Promise<SyncResult> {
     return this.withHeaderRules(this.HEADER_RULES, async () => {
-      logger.info('Starting publish...')
+      if (!this.userInfo) await this.checkAuth();
+      if (!this.csrf) throw new Error("获取 CSRF token 失败");
 
-      if (!this.userInfo) {
-        const auth = await this.checkAuth()
-        if (!auth.isAuthenticated) {
-          throw new Error('请先登录B站')
-        }
-      }
+      // 使用文章处理器处理内容
+      const processed = ArticleProcessor.processHtmlContent(article, {
+        supportsTags: true, // B站支持标签字段
+        supportsSummary: false, // B站没有独立摘要展示位
+        supportsCategory: false, // B站没有分类字段
+        supportsCover: true, // B站支持封面
+        supportsAuthor: false, // B站使用用户账号作为作者
+      });
 
-      if (!this.csrf) {
-        throw new Error('获取 CSRF token 失败，请刷新页面后重试')
-      }
+      // 拼接顺序：标签 -> 摘要 -> 正文 -> 版权
+      let finalHtml = processed.content;
 
-      // Use pre-processed HTML content directly
-      let content = article.html || ''
-
-      content = await this.processImages(
-        content,
+      // 4. 正文图片上传处理
+      finalHtml = await this.processImages(
+        finalHtml,
         (src) => this.uploadImageByUrl(src),
         {
-          skipPatterns: ['hdslb.com', 'bilibili.com', 'biliimg.com'],
+          skipPatterns: ["hdslb.com", "bilibili.com"],
           onProgress: options?.onImageProgress,
+        },
+      );
+
+      // 5. 封面上传
+      let coverUrl: string = "";
+      if (processed.cover) {
+        try {
+          const uploadRes = await this.uploadImageByUrl(processed.cover);
+          coverUrl = uploadRes.url;
+        } catch (error) {
+          console.error(`[Bilibili] 封面上传失败:`, error);
         }
-      )
-
-      const res = await this.postForm<{
-        code: number
-        message?: string
-        data?: { aid: number }
-      }>(
-        'https://api.bilibili.com/x/article/creative/draft/addupdate',
-        {
-          tid: '4',
-          title: article.title,
-          content: content,
-          csrf: this.csrf,
-          save: '0',
-          pgc_id: '0',
-        }
-      )
-
-      logger.debug('Draft response:', res)
-
-      if (res.code !== 0 || !res.data?.aid) {
-        throw new Error(res.message || '保存草稿失败')
       }
 
-      const draftUrl = `https://member.bilibili.com/platform/upload/text/edit?aid=${res.data.aid}`
+      // 6. 调用接口保存
+      const saveUrl = `https://api.bilibili.com/x/article/creative/draft/addupdate`;
+      const response = await this.runtime.fetch(saveUrl, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          title: processed.title,
+          content: finalHtml,
+          csrf: this.csrf,
+          tid: "4", // 默认分区
+          save: "0",
+          pgc_id: "0",
+          banner_url: coverUrl,
+          tags: processed.tags.join(","), // 使用处理后的标签
+          original: processed.articleType === "原创" ? "1" : "0",
+        }).toString(),
+      });
+
+      const res = await response.json();
+      const aid = res.data?.aid || res.data?.article_id;
+
+      if (res.code !== 0 || !aid)
+        throw new Error(res.message || "保存草稿失败");
 
       return this.createResult(true, {
-        postId: String(res.data.aid),
-        postUrl: draftUrl,
-        draftOnly: options?.draftOnly ?? true,
-      })
-    }).catch((error) => this.createResult(false, {
-      error: (error as Error).message,
-    }))
+        postId: String(aid),
+        postUrl: `https://member.bilibili.com/platform/upload/text/new-edit?aid=${aid}`,
+        draftOnly: true,
+      });
+    }).catch((error) =>
+      this.createResult(false, { error: (error as Error).message }),
+    );
   }
 
   protected async uploadImageByUrl(src: string): Promise<ImageUploadResult> {
-    if (!this.csrf) {
-      throw new Error('CSRF token 未获取')
-    }
+    if (!this.csrf) throw new Error("CSRF token 未获取");
+    const imageResponse = await fetch(src);
+    const imageBlob = await imageResponse.blob();
+    const formData = new FormData();
+    formData.append("binary", imageBlob, "image.jpg");
+    formData.append("csrf", this.csrf);
 
-    const imageResponse = await fetch(src)
-    if (!imageResponse.ok) {
-      throw new Error('图片下载失败: ' + src)
-    }
-    const imageBlob = await imageResponse.blob()
-
-    const formData = new FormData()
-    formData.append('binary', imageBlob, 'image.jpg')
-    formData.append('csrf', this.csrf)
-
-    const uploadUrl = 'https://api.bilibili.com/x/article/creative/article/upcover'
-    const uploadResponse = await this.runtime.fetch(uploadUrl, {
-      method: 'POST',
-      credentials: 'include',
-      body: formData,
-    })
-
-    const res = await uploadResponse.json() as {
-      code: number
-      message?: string
-      data?: {
-        url: string
-        size: number
-      }
-    }
-
-    logger.debug('Image upload response:', res)
-
-    if (res.code !== 0 || !res.data?.url) {
-      throw new Error(res.message || '图片上传失败')
-    }
-
-    return {
-      url: res.data.url,
-      attrs: {
-        size: String(res.data.size),
+    const uploadResponse = await this.runtime.fetch(
+      "https://api.bilibili.com/x/article/creative/article/upcover",
+      {
+        method: "POST",
+        credentials: "include",
+        body: formData,
       },
-    }
+    );
+
+    const res = await uploadResponse.json();
+    if (res.code !== 0 || !res.data?.url)
+      throw new Error(res.message || "图片上传失败");
+    return { url: res.data.url, attrs: { size: String(res.data.size || "") } };
   }
 }

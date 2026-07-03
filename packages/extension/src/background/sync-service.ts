@@ -8,83 +8,84 @@ import {
   syncToMultiplePlatforms,
   getAllPlatformMetas,
   type SyncDetailProgress,
-} from '../adapters'
-import * as wordpressAdapter from '../adapters/cms/wordpress'
-import * as metaweblogAdapter from '../adapters/cms/metaweblog'
-import { createLogger } from '../lib/logger'
+} from "../adapters";
+import * as wordpressAdapter from "../adapters/cms/wordpress";
+import * as metaweblogAdapter from "../adapters/cms/metaweblog";
+import { createLogger } from "../lib/logger";
 
-const logger = createLogger('SyncService')
+const logger = createLogger("SyncService");
 
 // 同步结果类型
 export interface SyncResult {
-  platform: string
-  platformName?: string
-  success: boolean
-  postUrl?: string
-  draftOnly?: boolean
-  error?: string
+  platform: string;
+  platformName?: string;
+  success: boolean;
+  postUrl?: string;
+  draftOnly?: boolean;
+  error?: string;
 }
 
 // 同步状态类型
-type SyncHistoryStatus = 'syncing' | 'completed' | 'failed' | 'cancelled'
+type SyncHistoryStatus = "syncing" | "completed" | "failed" | "cancelled";
 
 // 同步状态
 interface ActiveSyncState {
-  syncId: string
-  status: 'syncing' | 'completed' | 'failed' | 'cancelled'
+  syncId: string;
+  status: "syncing" | "completed" | "failed" | "cancelled";
   article: {
-    title: string
-    cover?: string
-    content?: string
-    html?: string
-    markdown?: string
-  } | null
-  selectedPlatforms: string[]
-  results: SyncResult[]
-  startTime: number
+    title: string;
+    cover?: string;
+    content?: string;
+    html?: string;
+    markdown?: string;
+  } | null;
+  selectedPlatforms: string[];
+  results: SyncResult[];
+  startTime: number;
 }
 
 // 历史记录项
 interface SyncHistoryItem {
-  id: string
-  status: SyncHistoryStatus
-  title: string
-  cover?: string
-  platforms: string[]
-  results: SyncResult[]
-  startTime: number
-  endTime?: number
+  id: string;
+  status: SyncHistoryStatus;
+  title: string;
+  cover?: string;
+  platforms: string[];
+  results: SyncResult[];
+  startTime: number;
+  endTime?: number;
 }
 
 // 同步配置
 interface SyncOptions {
-  skipHistory?: boolean
-  source?: string
+  skipHistory?: boolean;
+  source?: string;
+  draftOnly?: boolean; // 是否只保存草稿
 }
 
 // 进度回调
 export interface SyncProgressCallbacks {
-  onResult?: (result: SyncResult) => void
-  onImageProgress?: (platform: string, current: number, total: number) => void
-  onDetailProgress?: (progress: SyncDetailProgress) => void
+  onResult?: (result: SyncResult) => void;
+  onImageProgress?: (platform: string, current: number, total: number) => void;
+  onDetailProgress?: (progress: SyncDetailProgress) => void;
 }
 
-const SYNC_STATE_KEY = 'activeSyncState'
-const MAX_HISTORY_ITEMS = 25
+const SYNC_STATE_KEY = "activeSyncState";
+const MAX_HISTORY_ITEMS = 25;
 
 // Badge 颜色
 const BADGE_COLORS = {
-  syncing: '#3B82F6',   // 蓝色
-  success: '#22C55E',   // 绿色
-  error: '#EF4444',     // 红色
-  partial: '#F59E0B',   // 橙色
-}
+  syncing: "#3B82F6", // 蓝色
+  success: "#22C55E", // 绿色
+  error: "#EF4444", // 红色
+  partial: "#F59E0B", // 橙色
+};
 
 /**
  * 生成唯一同步ID
  */
 export function generateSyncId(): string {
-  return `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  return `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
 /**
@@ -92,48 +93,59 @@ export function generateSyncId(): string {
  */
 async function updateBadge(state: ActiveSyncState | null) {
   if (!state) {
-    await chrome.action.setBadgeText({ text: '' })
-    return
+    await chrome.action.setBadgeText({ text: "" });
+    return;
   }
 
-  const completed = state.results.length
-  const total = state.selectedPlatforms.length
+  const completed = state.results.length;
+  const total = state.selectedPlatforms.length;
 
-  if (state.status === 'syncing') {
-    await chrome.action.setBadgeText({ text: `${completed}/${total}` })
-    await chrome.action.setBadgeBackgroundColor({ color: BADGE_COLORS.syncing })
-  } else if (state.status === 'completed') {
-    const successCount = state.results.filter(r => r.success).length
-    const failedCount = total - successCount
+  if (state.status === "syncing") {
+    await chrome.action.setBadgeText({ text: `${completed}/${total}` });
+    await chrome.action.setBadgeBackgroundColor({
+      color: BADGE_COLORS.syncing,
+    });
+  } else if (state.status === "completed") {
+    const successCount = state.results.filter((r) => r.success).length;
+    const failedCount = total - successCount;
 
     if (failedCount === 0) {
-      await chrome.action.setBadgeText({ text: '✓' })
-      await chrome.action.setBadgeBackgroundColor({ color: BADGE_COLORS.success })
+      await chrome.action.setBadgeText({ text: "✓" });
+      await chrome.action.setBadgeBackgroundColor({
+        color: BADGE_COLORS.success,
+      });
     } else if (successCount === 0) {
-      await chrome.action.setBadgeText({ text: '!' })
-      await chrome.action.setBadgeBackgroundColor({ color: BADGE_COLORS.error })
+      await chrome.action.setBadgeText({ text: "!" });
+      await chrome.action.setBadgeBackgroundColor({
+        color: BADGE_COLORS.error,
+      });
     } else {
-      await chrome.action.setBadgeText({ text: `${successCount}` })
-      await chrome.action.setBadgeBackgroundColor({ color: BADGE_COLORS.partial })
+      await chrome.action.setBadgeText({ text: `${successCount}` });
+      await chrome.action.setBadgeBackgroundColor({
+        color: BADGE_COLORS.partial,
+      });
     }
 
     // 8秒后清除 badge
     setTimeout(async () => {
-      const storage = await chrome.storage.local.get(SYNC_STATE_KEY)
-      if (storage[SYNC_STATE_KEY]?.status === 'completed') {
-        await chrome.action.setBadgeText({ text: '' })
+      const storage = await chrome.storage.local.get(SYNC_STATE_KEY);
+      if (storage[SYNC_STATE_KEY]?.status === "completed") {
+        await chrome.action.setBadgeText({ text: "" });
       }
-    }, 8000)
-  } else if (state.status === 'failed' || state.status === 'cancelled') {
-    await chrome.action.setBadgeText({ text: '!' })
-    await chrome.action.setBadgeBackgroundColor({ color: BADGE_COLORS.error })
+    }, 8000);
+  } else if (state.status === "failed" || state.status === "cancelled") {
+    await chrome.action.setBadgeText({ text: "!" });
+    await chrome.action.setBadgeBackgroundColor({ color: BADGE_COLORS.error });
 
     setTimeout(async () => {
-      const storage = await chrome.storage.local.get(SYNC_STATE_KEY)
-      if (storage[SYNC_STATE_KEY]?.status === 'failed' || storage[SYNC_STATE_KEY]?.status === 'cancelled') {
-        await chrome.action.setBadgeText({ text: '' })
+      const storage = await chrome.storage.local.get(SYNC_STATE_KEY);
+      if (
+        storage[SYNC_STATE_KEY]?.status === "failed" ||
+        storage[SYNC_STATE_KEY]?.status === "cancelled"
+      ) {
+        await chrome.action.setBadgeText({ text: "" });
       }
-    }, 8000)
+    }, 8000);
   }
 }
 
@@ -141,8 +153,8 @@ async function updateBadge(state: ActiveSyncState | null) {
  * 保存同步状态
  */
 async function saveSyncState(state: ActiveSyncState) {
-  await chrome.storage.local.set({ [SYNC_STATE_KEY]: state })
-  await updateBadge(state)
+  await chrome.storage.local.set({ [SYNC_STATE_KEY]: state });
+  await updateBadge(state);
 }
 
 /**
@@ -151,27 +163,30 @@ async function saveSyncState(state: ActiveSyncState) {
 async function createHistoryItem(
   syncId: string,
   article: { title: string; cover?: string },
-  platforms: string[]
+  platforms: string[],
 ): Promise<void> {
   try {
-    const storage = await chrome.storage.local.get('syncHistory')
-    const existingHistory: SyncHistoryItem[] = storage.syncHistory || []
+    const storage = await chrome.storage.local.get("syncHistory");
+    const existingHistory: SyncHistoryItem[] = storage.syncHistory || [];
 
     const historyItem: SyncHistoryItem = {
       id: syncId,
-      status: 'syncing',
-      title: article.title || '未知文章',
+      status: "syncing",
+      title: article.title || "未知文章",
       cover: article.cover,
       platforms,
       results: [],
       startTime: Date.now(),
-    }
+    };
 
-    const newHistory = [historyItem, ...existingHistory].slice(0, MAX_HISTORY_ITEMS)
-    await chrome.storage.local.set({ syncHistory: newHistory })
-    logger.info('History created:', syncId, historyItem.title)
+    const newHistory = [historyItem, ...existingHistory].slice(
+      0,
+      MAX_HISTORY_ITEMS,
+    );
+    await chrome.storage.local.set({ syncHistory: newHistory });
+    logger.info("History created:", syncId, historyItem.title);
   } catch (error) {
-    logger.error('Failed to create history:', error)
+    logger.error("Failed to create history:", error);
   }
 }
 
@@ -182,33 +197,36 @@ async function updateHistoryItem(
   syncId: string,
   status: SyncHistoryStatus,
   results: SyncResult[],
-  allPlatformMetas: Array<{ id: string; name: string }>
+  allPlatformMetas: Array<{ id: string; name: string }>,
 ): Promise<void> {
   try {
-    const storage = await chrome.storage.local.get('syncHistory')
-    const existingHistory: SyncHistoryItem[] = storage.syncHistory || []
+    const storage = await chrome.storage.local.get("syncHistory");
+    const existingHistory: SyncHistoryItem[] = storage.syncHistory || [];
 
-    const resultsWithNames = results.map(r => ({
+    const resultsWithNames = results.map((r) => ({
       ...r,
-      platformName: r.platformName || allPlatformMetas.find(p => p.id === r.platform)?.name || r.platform,
-    }))
+      platformName:
+        r.platformName ||
+        allPlatformMetas.find((p) => p.id === r.platform)?.name ||
+        r.platform,
+    }));
 
-    const updatedHistory = existingHistory.map(item => {
+    const updatedHistory = existingHistory.map((item) => {
       if (item.id === syncId) {
         return {
           ...item,
           status,
           results: resultsWithNames,
           endTime: Date.now(),
-        }
+        };
       }
-      return item
-    })
+      return item;
+    });
 
-    await chrome.storage.local.set({ syncHistory: updatedHistory })
-    logger.info('History updated:', syncId, status)
+    await chrome.storage.local.set({ syncHistory: updatedHistory });
+    logger.info("History updated:", syncId, status);
   } catch (error) {
-    logger.error('Failed to update history:', error)
+    logger.error("Failed to update history:", error);
   }
 }
 
@@ -223,45 +241,65 @@ async function updateHistoryItem(
  */
 export async function performSync(
   article: {
-    title: string
-    content?: string
-    html?: string
-    markdown?: string
-    cover?: string
+    title: string;
+    author?: string;
+    summary?: string;
+    content?: string;
+    url?: string;
+    tags?: string[];
+    category?: string;
+    articleType?: string;
+    publishDate?: string;
+    html?: string;
+    markdown?: string;
+    cover?: string;
   },
   platforms: string[],
   options: SyncOptions = {},
-  callbacks: SyncProgressCallbacks = {}
+  callbacks: SyncProgressCallbacks = {},
 ): Promise<{ results: SyncResult[]; syncId: string }> {
-  const { skipHistory = false, source = 'mcp' } = options
-  const { onResult, onImageProgress, onDetailProgress } = callbacks
+  const { skipHistory = false, source = "mcp", draftOnly = true } = options;
+  const { onResult, onImageProgress, onDetailProgress } = callbacks;
 
-  const allPlatformMetas = getAllPlatformMetas()
-  const platformNameById = new Map(allPlatformMetas.map(meta => [meta.id, meta.name]))
-  const syncId = generateSyncId()
+  const allPlatformMetas = getAllPlatformMetas();
+  const platformNameById = new Map(
+    allPlatformMetas.map((meta) => [meta.id, meta.name]),
+  );
+  const syncId = generateSyncId();
 
   // 规范化文章对象，确保必需字段有默认值
   const normalizedArticle = {
     title: article.title,
-    content: article.content || article.html || '',
-    html: article.html || article.content || '',
-    markdown: article.markdown || '',
-    cover: article.cover,
-  }
+    author: article.author || "",
+    summary: article.summary || "",
+    cover: article.cover || "",
+    url: article.url || "",
+    tags: article.tags || [],
+    category: article.category || "",
+    articleType: article.articleType || "",
+    publishDate: article.publishDate || "",
+    content: article.content || article.html || "",
+    html: article.html || article.content || "",
+    markdown: article.markdown || "",
+  };
 
   // 获取 CMS 账户信息以区分 DSL 和 CMS
-  const cmsStorage = await chrome.storage.local.get('cmsAccounts')
-  const cmsAccounts = cmsStorage.cmsAccounts || []
-  const cmsAccountIds = new Set(cmsAccounts.map((a: any) => a.id))
+  const cmsStorage = await chrome.storage.local.get("cmsAccounts");
+  const cmsAccounts = cmsStorage.cmsAccounts || [];
+  const cmsAccountIds = new Set(cmsAccounts.map((a: any) => a.id));
 
   // 分离 DSL 平台和 CMS 账户
-  const dslPlatformIds = platforms.filter((id: string) => !cmsAccountIds.has(id))
-  const cmsPlatformIds = platforms.filter((id: string) => cmsAccountIds.has(id))
+  const dslPlatformIds = platforms.filter(
+    (id: string) => !cmsAccountIds.has(id),
+  );
+  const cmsPlatformIds = platforms.filter((id: string) =>
+    cmsAccountIds.has(id),
+  );
 
   // 初始化同步状态
   const syncState: ActiveSyncState = {
     syncId,
-    status: 'syncing',
+    status: "syncing",
     article: {
       title: normalizedArticle.title,
       cover: normalizedArticle.cover,
@@ -272,95 +310,138 @@ export async function performSync(
     selectedPlatforms: platforms,
     results: [],
     startTime: Date.now(),
-  }
-  await saveSyncState(syncState)
+  };
+  await saveSyncState(syncState);
 
   // 创建历史记录
   if (!skipHistory) {
-    await createHistoryItem(syncId, normalizedArticle, platforms)
+    await createHistoryItem(syncId, normalizedArticle, platforms);
   }
 
-  const allResults: SyncResult[] = []
+  const allResults: SyncResult[] = [];
 
   // 同步到 DSL 平台
   if (dslPlatformIds.length > 0) {
-    await syncToMultiplePlatforms(dslPlatformIds, normalizedArticle, {
-      onResult: (result) => {
-        const resultWithName: SyncResult = {
-          ...result,
-          platformName: platformNameById.get(result.platform) || result.platform,
-        }
-        syncState.results.push(resultWithName)
-        allResults.push(resultWithName)
-        saveSyncState(syncState).catch(() => {})
+    await syncToMultiplePlatforms(
+      dslPlatformIds,
+      normalizedArticle,
+      {
+        onResult: (result) => {
+          const resultWithName: SyncResult = {
+            ...result,
+            platformName:
+              platformNameById.get(result.platform) || result.platform,
+          };
+          syncState.results.push(resultWithName);
+          allResults.push(resultWithName);
+          saveSyncState(syncState).catch(() => {});
 
-        onResult?.(resultWithName)
+          onResult?.(resultWithName);
+        },
+        onImageProgress: (platform, current, total) => {
+          onImageProgress?.(platform, current, total);
+        },
+        onDetailProgress: (progress: SyncDetailProgress) => {
+          onDetailProgress?.(progress);
+        },
       },
-      onImageProgress: (platform, current, total) => {
-        onImageProgress?.(platform, current, total)
-      },
-      onDetailProgress: (progress: SyncDetailProgress) => {
-        onDetailProgress?.(progress)
-      },
-    }, source)
+      source,
+      draftOnly,
+    ); // 传递 draftOnly 参数
   }
 
   // 同步到 CMS 账户
   for (const accountId of cmsPlatformIds) {
-    const account = cmsAccounts.find((a: any) => a.id === accountId)
+    const account = cmsAccounts.find((a: any) => a.id === accountId);
     if (!account) {
       const cmsResult: SyncResult = {
         platform: accountId,
         platformName: platformNameById.get(accountId) || accountId,
         success: false,
-        error: 'CMS 账户不存在',
-      }
-      allResults.push(cmsResult)
-      syncState.results.push(cmsResult)
-      saveSyncState(syncState).catch(() => {})
-      onResult?.(cmsResult)
-      onDetailProgress?.({ platform: accountId, platformName: cmsResult.platformName || accountId, stage: 'failed', error: cmsResult.error })
-      continue
+        error: "CMS 账户不存在",
+      };
+      allResults.push(cmsResult);
+      syncState.results.push(cmsResult);
+      saveSyncState(syncState).catch(() => {});
+      onResult?.(cmsResult);
+      onDetailProgress?.({
+        platform: accountId,
+        platformName: cmsResult.platformName || accountId,
+        stage: "failed",
+        error: cmsResult.error,
+      });
+      continue;
     }
 
-    onDetailProgress?.({ platform: accountId, platformName: account.name, stage: 'starting' })
+    onDetailProgress?.({
+      platform: accountId,
+      platformName: account.name,
+      stage: "starting",
+    });
 
     try {
-      const passwordStorage = await chrome.storage.local.get(`cms_pwd_${accountId}`)
-      const password = passwordStorage[`cms_pwd_${accountId}`]
+      const passwordStorage = await chrome.storage.local.get(
+        `cms_pwd_${accountId}`,
+      );
+      const password = passwordStorage[`cms_pwd_${accountId}`];
 
       if (!password) {
         const cmsResult: SyncResult = {
           platform: accountId,
           platformName: account.name,
           success: false,
-          error: '密码未找到',
-        }
-        allResults.push(cmsResult)
-        syncState.results.push(cmsResult)
-        saveSyncState(syncState).catch(() => {})
-        onResult?.(cmsResult)
-        onDetailProgress?.({ platform: accountId, platformName: account.name, stage: 'failed', error: '密码未找到' })
-        continue
+          error: "密码未找到",
+        };
+        allResults.push(cmsResult);
+        syncState.results.push(cmsResult);
+        saveSyncState(syncState).catch(() => {});
+        onResult?.(cmsResult);
+        onDetailProgress?.({
+          platform: accountId,
+          platformName: account.name,
+          stage: "failed",
+          error: "密码未找到",
+        });
+        continue;
       }
 
-      onDetailProgress?.({ platform: accountId, platformName: account.name, stage: 'saving' })
+      onDetailProgress?.({
+        platform: accountId,
+        platformName: account.name,
+        stage: "saving",
+      });
 
-      const credentials = { url: account.url, username: account.username, password }
-      let result
+      const credentials = {
+        url: account.url,
+        username: account.username,
+        password,
+      };
+      let result;
 
       switch (account.type) {
-        case 'wordpress':
-          result = await wordpressAdapter.publish(credentials, normalizedArticle, { draftOnly: true })
-          break
-        case 'typecho':
-          result = await metaweblogAdapter.publishToTypecho(credentials, normalizedArticle, { draftOnly: true })
-          break
-        case 'metaweblog':
-          result = await metaweblogAdapter.publish(credentials, normalizedArticle, { draftOnly: true })
-          break
+        case "wordpress":
+          result = await wordpressAdapter.publish(
+            credentials,
+            normalizedArticle,
+            { draftOnly },
+          );
+          break;
+        case "typecho":
+          result = await metaweblogAdapter.publishToTypecho(
+            credentials,
+            normalizedArticle,
+            { draftOnly },
+          );
+          break;
+        case "metaweblog":
+          result = await metaweblogAdapter.publish(
+            credentials,
+            normalizedArticle,
+            { draftOnly },
+          );
+          break;
         default:
-          result = { success: false, error: '不支持的 CMS 类型' }
+          result = { success: false, error: "不支持的 CMS 类型" };
       }
 
       const cmsResult: SyncResult = {
@@ -368,52 +449,57 @@ export async function performSync(
         platformName: account.name,
         success: result.success,
         postUrl: result.postUrl,
-        draftOnly: true,
+        draftOnly, // 使用传入的 draftOnly 参数
         error: result.error,
-      }
-      allResults.push(cmsResult)
-      syncState.results.push(cmsResult)
-      saveSyncState(syncState).catch(() => {})
-      onResult?.(cmsResult)
+      };
+      allResults.push(cmsResult);
+      syncState.results.push(cmsResult);
+      saveSyncState(syncState).catch(() => {});
+      onResult?.(cmsResult);
       onDetailProgress?.({
         platform: accountId,
         platformName: account.name,
-        stage: result.success ? 'completed' : 'failed',
+        stage: result.success ? "completed" : "failed",
         error: result.error,
-      })
+      });
     } catch (error) {
       const cmsResult: SyncResult = {
         platform: accountId,
         platformName: account.name,
         success: false,
         error: (error as Error).message,
-      }
-      allResults.push(cmsResult)
-      syncState.results.push(cmsResult)
-      saveSyncState(syncState).catch(() => {})
-      onResult?.(cmsResult)
-      onDetailProgress?.({ platform: accountId, platformName: account.name, stage: 'failed', error: (error as Error).message })
+      };
+      allResults.push(cmsResult);
+      syncState.results.push(cmsResult);
+      saveSyncState(syncState).catch(() => {});
+      onResult?.(cmsResult);
+      onDetailProgress?.({
+        platform: accountId,
+        platformName: account.name,
+        stage: "failed",
+        error: (error as Error).message,
+      });
     }
   }
 
   // 确定最终状态
-  const successCount = allResults.filter(r => r.success).length
-  const failedCount = allResults.length - successCount
+  const successCount = allResults.filter((r) => r.success).length;
+  const failedCount = allResults.length - successCount;
   const finalStatus: SyncHistoryStatus =
     allResults.length === 0 && platforms.length > 0
-      ? 'failed'
+      ? "failed"
       : failedCount === allResults.length && allResults.length > 0
-        ? 'failed'
-        : 'completed'
+        ? "failed"
+        : "completed";
 
   // 更新为完成状态
-  syncState.status = finalStatus
-  await saveSyncState(syncState)
+  syncState.status = finalStatus;
+  await saveSyncState(syncState);
 
   // 更新历史记录
   if (!skipHistory) {
-    await updateHistoryItem(syncId, finalStatus, allResults, allPlatformMetas)
+    await updateHistoryItem(syncId, finalStatus, allResults, allPlatformMetas);
   }
 
-  return { results: allResults, syncId }
+  return { results: allResults, syncId };
 }

@@ -1,98 +1,104 @@
 /**
  * 搜狐号适配器
  */
-import { CodeAdapter, type ImageUploadResult } from '../code-adapter'
-import type { Article, AuthResult, SyncResult, PlatformMeta } from '../../types'
-import type { PublishOptions } from '../types'
-import { createLogger } from '../../lib/logger'
+import { CodeAdapter, type ImageUploadResult } from "../code-adapter";
+import type {
+  Article,
+  AuthResult,
+  SyncResult,
+  PlatformMeta,
+} from "../../types";
+import type { PublishOptions } from "../types";
+import { createLogger } from "../../lib/logger";
+import { ArticleProcessor } from "../article-processor";
 
-const logger = createLogger('Sohu')
+const logger = createLogger("Sohu");
 
 interface SohuAccountInfo {
-  id: string
-  nickName: string
-  avatar: string
+  id: string;
+  nickName: string;
+  avatar: string;
 }
 
 /**
  * 生成设备 ID (dv-id)
  */
 function generateDeviceId(): string {
-  const chars = '0123456789abcdef'
-  let result = ''
+  const chars = "0123456789abcdef";
+  let result = "";
   for (let i = 0; i < 32; i++) {
-    result += chars[Math.floor(Math.random() * chars.length)]
+    result += chars[Math.floor(Math.random() * chars.length)];
   }
-  return result
+  return result;
 }
 
 export class SohuAdapter extends CodeAdapter {
   readonly meta: PlatformMeta = {
-    id: 'sohu',
-    name: '搜狐号',
-    icon: 'https://mp.sohu.com/favicon.ico',
-    homepage: 'https://mp.sohu.com/mpfe/v3/main/first/page?newsType=1',
-    capabilities: ['article', 'draft', 'image_upload'],
-  }
+    id: "sohu",
+    name: "搜狐号",
+    icon: "https://mp.sohu.com/favicon.ico",
+    homepage: "https://mp.sohu.com/mpfe/v3/main/first/page?newsType=1",
+    capabilities: ["article", "draft", "image_upload"],
+  };
 
   /** 预处理配置: 搜狐号使用 HTML 格式 */
   readonly preprocessConfig = {
-    outputFormat: 'html' as const,
-  }
+    outputFormat: "html" as const,
+  };
 
-  private accountInfo: SohuAccountInfo | null = null
-  private deviceId: string = generateDeviceId()
-  private spCm: string = ''
+  private accountInfo: SohuAccountInfo | null = null;
+  private deviceId: string = generateDeviceId();
+  private spCm: string = "";
 
   /** 搜狐号 API 需要的 Header 规则 */
   private readonly HEADER_RULES = [
     {
-      urlFilter: '*://mp.sohu.com/*',
+      urlFilter: "*://mp.sohu.com/*",
       headers: {
-        'Origin': 'https://mp.sohu.com',
-        'Referer': 'https://mp.sohu.com/',
+        Origin: "https://mp.sohu.com",
+        Referer: "https://mp.sohu.com/",
       },
-      resourceTypes: ['xmlhttprequest'],
+      resourceTypes: ["xmlhttprequest"],
     },
-  ]
+  ];
 
   async checkAuth(): Promise<AuthResult> {
     try {
       const response = await this.runtime.fetch(
         `https://mp.sohu.com/mpbp/bp/account/register-info?_=${Date.now()}`,
         {
-          method: 'GET',
-          credentials: 'include',
-        }
-      )
+          method: "GET",
+          credentials: "include",
+        },
+      );
 
-      const res = await response.json() as {
-        code: number
+      const res = (await response.json()) as {
+        code: number;
         data?: {
-          account: SohuAccountInfo
-        }
-      }
+          account: SohuAccountInfo;
+        };
+      };
 
-      logger.debug(' checkAuth response:', res)
+      logger.debug(" checkAuth response:", res);
 
       if (res.code !== 2000000 || !res.data?.account) {
-        return { isAuthenticated: false }
+        return { isAuthenticated: false };
       }
 
-      this.accountInfo = res.data.account
+      this.accountInfo = res.data.account;
 
       // 获取 mp-cv cookie 用于 sp-cm header
-      await this.fetchSpCm()
+      await this.fetchSpCm();
 
       return {
         isAuthenticated: true,
         userId: String(this.accountInfo.id),
         username: this.accountInfo.nickName,
         avatar: this.accountInfo.avatar,
-      }
+      };
     } catch (error) {
-      logger.debug('checkAuth: not logged in -', error)
-      return { isAuthenticated: false, error: (error as Error).message }
+      logger.debug("checkAuth: not logged in -", error);
+      return { isAuthenticated: false, error: (error as Error).message };
     }
   }
 
@@ -103,112 +109,136 @@ export class SohuAdapter extends CodeAdapter {
     try {
       // 尝试通过 runtime 获取 cookie（如果支持）
       if (this.runtime.getCookie) {
-        const cookieValue = await this.runtime.getCookie('.sohu.com', 'mp-cv')
+        const cookieValue = await this.runtime.getCookie(".sohu.com", "mp-cv");
         if (cookieValue) {
-          this.spCm = cookieValue
-          logger.debug('Got sp-cm from cookie:', this.spCm)
-          return
+          this.spCm = cookieValue;
+          logger.debug("Got sp-cm from cookie:", this.spCm);
+          return;
         }
       }
       // fallback: 生成一个
-      this.spCm = `100-${Date.now()}-${generateDeviceId()}`
-      logger.debug('Generated sp-cm:', this.spCm)
+      this.spCm = `100-${Date.now()}-${generateDeviceId()}`;
+      logger.debug("Generated sp-cm:", this.spCm);
     } catch (error) {
       // fallback: 生成一个
-      this.spCm = `100-${Date.now()}-${generateDeviceId()}`
-      logger.debug('Fallback sp-cm:', this.spCm)
+      this.spCm = `100-${Date.now()}-${generateDeviceId()}`;
+      logger.debug("Fallback sp-cm:", this.spCm);
     }
   }
 
-  async publish(article: Article, options?: PublishOptions): Promise<SyncResult> {
+  async publish(
+    article: Article,
+    options?: PublishOptions,
+  ): Promise<SyncResult> {
     return this.withHeaderRules(this.HEADER_RULES, async () => {
-      logger.info('Starting publish...')
+      logger.info("Starting publish...");
 
       // 1. 确保已登录
       if (!this.accountInfo) {
-        const auth = await this.checkAuth()
+        const auth = await this.checkAuth();
         if (!auth.isAuthenticated) {
-          throw new Error('请先登录搜狐号')
+          throw new Error("请先登录搜狐号");
         }
       }
 
-      // Use pre-processed HTML content directly
-      let content = article.html || ''
+      // 使用文章处理器处理内容（搜狐号使用 HTML 格式）
+      const processed = ArticleProcessor.processHtmlContent(article, {
+        supportsTags: true, // 搜狐号支持标签
+        supportsSummary: true, // 搜狐号支持摘要
+        supportsCategory: true, // 搜狐号支持分类
+        supportsCover: true, // 搜狐号支持封面
+        supportsAuthor: false, // 搜狐号不支持作者字段
+      });
 
-      // Process images
-      content = await this.processImages(
-        content,
+      // 处理图片
+      let content = await this.processImages(
+        processed.content,
         (src) => this.uploadImageByUrl(src),
         {
-          skipPatterns: ['sohu.com'],
+          skipPatterns: ["sohu.com"],
           onProgress: options?.onImageProgress,
-        }
-      )
+        },
+      );
 
-      // 4. 保存草稿 (v2 API - JSON 格式)
+      // 处理封面图
+      let coverUrl = "";
+      if (processed.cover) {
+        try {
+          const coverUploadResult = await this.uploadImageByUrl(
+            processed.cover,
+          );
+          coverUrl = coverUploadResult.url;
+        } catch (error) {
+          logger.error("Failed to upload cover image:", error);
+        }
+      }
+
+      // 保存草稿 (v2 API - JSON 格式)
       const postData = {
-        title: article.title,
-        brief: '',
+        title: processed.title,
+        brief: processed.summary || "",
         content: content,
-        channelId: 24,
+        channelId: processed.category ? Number(processed.category) : 24,
         categoryId: -1,
         id: 0,
         userColumnId: 0,
         columnNewsIds: [],
         businessCode: 0,
-        declareOriginal: false,
-        cover: '',
+        declareOriginal: processed.articleType === "original",
+        cover: coverUrl,
         topicIds: [],
         isAd: 0,
-        userLabels: '[]',
-        reprint: false,
-        customTags: '',
+        userLabels: "[]",
+        reprint: processed.articleType === "转载",
+        customTags: processed.tags.join(",") || "",
         infoResource: 0,
-        sourceUrl: '',
+        sourceUrl: article.url || "",
         visibleToLoginedUsers: 0,
         attrIds: [],
         auto: true,
         accountId: Number(this.accountInfo!.id),
-      }
+      };
 
       const response = await this.runtime.fetch(
         `https://mp.sohu.com/mpbp/bp/news/v4/news/draft/v2?accountId=${this.accountInfo!.id}`,
         {
-          method: 'POST',
-          credentials: 'include',
+          method: "POST",
+          credentials: "include",
           headers: {
-            'Content-Type': 'application/json',
-            'X-Requested-With': 'XMLHttpRequest',
-            'dv-id': this.deviceId,
-            'sp-cm': this.spCm,
+            "Content-Type": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+            "dv-id": this.deviceId,
+            "sp-cm": this.spCm,
           },
           body: JSON.stringify(postData),
-        }
-      )
+        },
+      );
 
-      const res = await response.json() as {
-        success: boolean
-        data?: string | number
-        msg?: string
-      }
+      const res = (await response.json()) as {
+        success: boolean;
+        data?: string | number;
+        msg?: string;
+      };
 
-      logger.debug(' Save response:', res)
+      logger.debug(" Save response:", res);
 
       if (!res.success) {
-        throw new Error(res.msg || '保存失败')
+        throw new Error(res.msg || "保存失败");
       }
 
-      const postId = res.data
-      const draftUrl = `https://mp.sohu.com/mpfe/v4/contentManagement/news/addarticle?spm=smmp.articlelist.0.0&contentStatus=2&id=${postId}`
+      const postId = res.data;
+      const draftUrl = `https://mp.sohu.com/mpfe/v4/contentManagement/news/addarticle?spm=smmp.articlelist.0.0&contentStatus=2&id=${postId}`;
 
       return this.createResult(true, {
         postId: String(postId),
         postUrl: draftUrl,
         draftOnly: options?.draftOnly ?? true,
-      })
-    }).catch((error) => this.createResult(false, {
-      error: (error as Error).message,
-    }))
+      });
+    }).catch((error) =>
+      this.createResult(false, {
+        error: (error as Error).message,
+      }),
+    );
   }
 
   /**
@@ -216,42 +246,43 @@ export class SohuAdapter extends CodeAdapter {
    */
   protected async uploadImageByUrl(src: string): Promise<ImageUploadResult> {
     if (!this.accountInfo) {
-      throw new Error('未登录')
+      throw new Error("未登录");
     }
 
     // 1. 下载图片
-    const imageResponse = await fetch(src)
+    const imageResponse = await fetch(src);
     if (!imageResponse.ok) {
-      throw new Error('图片下载失败: ' + src)
+      throw new Error("图片下载失败: " + src);
     }
-    const imageBlob = await imageResponse.blob()
+    const imageBlob = await imageResponse.blob();
 
     // 2. 上传到搜狐
-    const formData = new FormData()
-    formData.append('file', imageBlob, 'image.jpg')
-    formData.append('accountId', this.accountInfo.id)
+    const formData = new FormData();
+    formData.append("file", imageBlob, "image.jpg");
+    formData.append("accountId", this.accountInfo.id);
 
     const uploadResponse = await this.runtime.fetch(
-      'https://mp.sohu.com/commons/front/outerUpload/image/file?accountId='+  this.accountInfo.id,
+      "https://mp.sohu.com/commons/front/outerUpload/image/file?accountId=" +
+        this.accountInfo.id,
       {
-        method: 'POST',
-        credentials: 'include',
+        method: "POST",
+        credentials: "include",
         body: formData,
-      }
-    )
+      },
+    );
 
-    const res = await uploadResponse.json() as {
-      url?: string
-      msg?: string
-    }
+    const res = (await uploadResponse.json()) as {
+      url?: string;
+      msg?: string;
+    };
 
-    logger.debug(' Image upload response:', res)
+    logger.debug(" Image upload response:", res);
     if (!res.url) {
-      throw new Error('图片上传失败:'+ (res.msg))
+      throw new Error("图片上传失败:" + res.msg);
     }
 
     return {
       url: res.url,
-    }
+    };
   }
 }
