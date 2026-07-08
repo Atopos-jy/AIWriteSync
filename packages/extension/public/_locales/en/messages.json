@@ -1,0 +1,10 @@
+{
+  "extensionName": {
+    "message": "AI Content Sync",
+    "description": "Extension name"
+  },
+  "extensionDescription": {
+    "message": "One-click sync articles to 25+ platforms (Zhihu, Juejin, CSDN, etc.) with built-in AI polishing, rewriting and summarization",
+    "description": "Extension description"
+  }
+}

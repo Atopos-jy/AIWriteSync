@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "文稿AI同步助手",
-  "description": "多平台文章一键同步，内置AI润色、改写、内容摘要功能，自媒体文案写作工具",
+  "default_locale": "zh_CN",
+  "name": "__MSG_extensionName__",
+  "description": "__MSG_extensionDescription__",
   "version": "1.0.0",
   "icons": {
     "16": "assets/icon-16.png",

@@ -1,0 +1,10 @@
+{
+  "extensionName": {
+    "message": "文稿AI同步助手",
+    "description": "扩展名称"
+  },
+  "extensionDescription": {
+    "message": "多平台文章一键同步，内置AI润色、改写、内容摘要功能，自媒体文案写作工具",
+    "description": "扩展描述"
+  }
+}

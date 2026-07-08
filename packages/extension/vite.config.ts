@@ -62,6 +62,26 @@ function copyStaticFilesPlugin() {
         }
       }
 
+      // 复制 _locales 国际化目录
+      const localesDir = resolve(__dirname, 'public/_locales')
+      if (existsSync(localesDir)) {
+        const copyDir = (src, dest) => {
+          if (!existsSync(dest)) mkdirSync(dest, { recursive: true })
+          const entries = readdirSync(src, { withFileTypes: true })
+          for (const entry of entries) {
+            const srcPath = resolve(src, entry.name)
+            const destPath = resolve(dest, entry.name)
+            if (entry.isDirectory()) {
+              copyDir(srcPath, destPath)
+            } else {
+              copyFileSync(srcPath, destPath)
+            }
+          }
+        }
+        copyDir(localesDir, resolve(distDir, '_locales'))
+        console.log(`[copy-static] Copied _locales to dist/`)
+      }
+
       // 修改输出的 manifest.json，添加 reader 脚本到 content_scripts
       const manifestPath = resolve(__dirname, 'dist/manifest.json')
       if (existsSync(manifestPath)) {
