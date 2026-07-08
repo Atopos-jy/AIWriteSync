@@ -1079,7 +1079,7 @@ export function EditorApp() {
                     setPlatformProgress(new Map());
                     setCurrentSyncId(null);
                   }}
-                  className="px-4 py-2 rounded-lg bg-green-500 text-white hover:bg-green-600"
+                  className="px-4 py-2 rounded-lg bg-purple-500 text-white hover:bg-purple-600"
                 >
                   完成
                 </button>

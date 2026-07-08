@@ -2,7 +2,7 @@
   "name": "@aiwritesync/extension",
   "version": "2.0.5",
   "private": true,
-  "description": "AI 文章同步助手 Chrome 扩展",
+  "description": "文稿AI同步助手 Chrome 扩展 - 多平台文章一键同步，内置AI润色、改写、内容摘要功能",
   "type": "module",
   "scripts": {
     "dev": "vite",
