@@ -1310,31 +1310,26 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     recordInstallTimestamp().catch(() => {});
   }
 
+  // TODO: 等官网做好后恢复欢迎页跳转
   // 升级时打开 changelog 页面
-  if (details.reason === "update") {
-    const previousVersion = details.previousVersion || "0.0.0";
-    const currentVersion = chrome.runtime.getManifest().version;
-
-    // 从 1.x 升级到 2.x，显示更新日志
-    if (previousVersion.startsWith("1.") && currentVersion.startsWith("2.")) {
-      chrome.tabs.create({
-        url:
-          "https://www.aiwritesync.com/changelog?from=" +
-          previousVersion +
-          "&to=" +
-          currentVersion,
-        active: true,
-      });
-    }
-  }
+  // if (details.reason === "update") {
+  //   const previousVersion = details.previousVersion || "0.0.0";
+  //   const currentVersion = chrome.runtime.getManifest().version;
+  //   if (previousVersion.startsWith("1.") && currentVersion.startsWith("2.")) {
+  //     chrome.tabs.create({
+  //       url: "https://www.你的网址.com/changelog?from=" + previousVersion + "&to=" + currentVersion,
+  //       active: true,
+  //     });
+  //   }
+  // }
 
   // 首次安装时打开欢迎页
-  if (details.reason === "install") {
-    chrome.tabs.create({
-      url: "https://www.aiwritesync.com/?utm_source=extension&utm_medium=install",
-      active: true,
-    });
-  }
+  // if (details.reason === "install") {
+  //   chrome.tabs.create({
+  //     url: "https://www.你的网址.com/?utm_source=extension&utm_medium=install",
+  //     active: true,
+  //   });
+  // }
 });
 
 /**
