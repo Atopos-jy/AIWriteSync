@@ -1,8 +1,8 @@
 {
   "name": "AIWritesync",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "微信公众号同步助手 - 多平台内容分发工具",
+  "description": "文稿AI同步助手 - 多平台文章一键同步，内置AI润色功能",
   "workspaces": [
     "packages/*"
   ],
