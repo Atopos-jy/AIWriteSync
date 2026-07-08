@@ -36,7 +36,7 @@ yarn build
   "mcpServers": {
     "sync-assistant": {
       "command": "node",
-      "args": ["/path/to/Wechatsync/packages/mcp-server/dist/index.js"],
+      "args": ["/path/to/AIWriteSync/packages/mcp-server/dist/index.js"],
       "env": {
         "MCP_TOKEN": "your-secret-token-here"
       }
@@ -130,7 +130,7 @@ yarn build
 
 ```bash
 # 监听模式
-yarn workspace @wechatsync/mcp-server dev
+yarn workspace @aiwritesync/mcp-server dev
 
 # 构建
 yarn build:mcp

@@ -1,5 +1,5 @@
 ---
-name: wechatsync
+name: aiwritesync
 description: 同步文章到多个内容平台（知乎、掘金、CSDN、头条、微博等）。当用户想要发布或同步文章到内容平台时使用。
 ---
 
@@ -9,8 +9,8 @@ description: 同步文章到多个内容平台（知乎、掘金、CSDN、头条
 
 ## 前置条件
 
-1. 安装 CLI: `npm install -g @wechatsync/cli`
-2. 安装 Chrome 扩展: https://www.wechatsync.com/#install
+1. 安装 CLI: `npm install -g @aiwritesync/cli`
+2. 安装 Chrome 扩展: https://www.aiwritesync.com/#install
 3. 在扩展设置中启用 MCP 连接，获取 Token
 4. 设置环境变量: `export WECHATSYNC_TOKEN="你的token"`
 5. 在各平台登录账号
@@ -21,49 +21,49 @@ description: 同步文章到多个内容平台（知乎、掘金、CSDN、头条
 
 ```bash
 # 同步到单个平台
-wechatsync sync article.md -p juejin
+aiwritesync sync article.md -p juejin
 
 # 同步到多个平台
-wechatsync sync article.md -p juejin,zhihu,csdn
+aiwritesync sync article.md -p juejin,zhihu,csdn
 
 # 指定标题
-wechatsync sync article.md -p juejin -t "我的文章标题"
+aiwritesync sync article.md -p juejin -t "我的文章标题"
 
 # 添加封面图
-wechatsync sync article.md -p juejin --cover ./cover.png
+aiwritesync sync article.md -p juejin --cover ./cover.png
 
 # 预览（不实际同步）
-wechatsync sync article.md -p juejin --dry-run
+aiwritesync sync article.md -p juejin --dry-run
 ```
 
 ### 查看平台
 
 ```bash
 # 列出所有平台
-wechatsync platforms
+aiwritesync platforms
 
 # 显示登录状态
-wechatsync platforms --auth
+aiwritesync platforms --auth
 ```
 
 ### 检查登录状态
 
 ```bash
 # 检查所有平台
-wechatsync auth
+aiwritesync auth
 
 # 检查单个平台
-wechatsync auth zhihu
+aiwritesync auth zhihu
 ```
 
 ### 提取文章
 
 ```bash
 # 从浏览器当前页面提取
-wechatsync extract
+aiwritesync extract
 
 # 保存到文件
-wechatsync extract -o article.md
+aiwritesync extract -o article.md
 ```
 
 ## 支持的平台
@@ -86,11 +86,11 @@ zhihu, juejin, jianshu, toutiao, weibo, bilibili, baijiahao, csdn, yuque, douban
 
 用户: "把这篇文章同步到掘金和知乎"
 操作:
-1. 先用 `wechatsync platforms --auth` 检查登录状态
-2. 用 `wechatsync sync <文件路径> -p juejin,zhihu` 同步
+1. 先用 `aiwritesync platforms --auth` 检查登录状态
+2. 用 `aiwritesync sync <文件路径> -p juejin,zhihu` 同步
 
 用户: "帮我看看哪些平台已登录"
-操作: `wechatsync platforms --auth`
+操作: `aiwritesync platforms --auth`
 
 用户: "从浏览器提取当前文章保存下来"
-操作: `wechatsync extract -o article.md`
+操作: `aiwritesync extract -o article.md`

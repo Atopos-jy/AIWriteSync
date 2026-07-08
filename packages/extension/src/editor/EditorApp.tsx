@@ -20,7 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { createLogger } from "../lib/logger";
 import { useDebounce } from "use-debounce";
-import { htmlToMarkdownNative, markdownToHtml } from "@wechatsync/core";
+import { htmlToMarkdownNative, markdownToHtml } from "@aiwritesync/core";
 import { marked } from "marked";
 import { TipTapEditor } from "./TipTapEditor";
 const logger = createLogger("Editor");

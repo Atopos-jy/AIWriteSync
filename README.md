@@ -1,8 +1,8 @@
-# 文章同步助手 (Wechatsync)
+# AI 文章同步助手 (AIWriteSync)
 
-![](https://img.shields.io/github/v/release/wechatsync/Wechatsync.svg)
-![](https://img.shields.io/github/last-commit/wechatsync/Wechatsync)
-![](https://img.shields.io/github/issues/wechatsync/Wechatsync)
+![](https://img.shields.io/github/v/release/Atopos-jy/AIWriteSync.svg)
+![](https://img.shields.io/github/last-commit/Atopos-jy/AIWriteSync)
+![](https://img.shields.io/github/issues/Atopos-jy/AIWriteSync)
 
 **开源免费**的跨平台文章同步工具 | Chrome 浏览器扩展 | 自媒体内容分发神器
 
@@ -41,10 +41,7 @@
 
 ### Chrome 浏览器扩展安装
 
-**推荐**: [Chrome 网上应用店](https://chrome.google.com/webstore/detail/%E5%BE%AE%E4%BF%A1%E5%90%8C%E6%AD%A5%E5%8A%A9%E6%89%8B/hchobocdmclopcbnibdnoafilagadion) (自动更新)
-
-**手动安装**: 下载 [最新 Release](https://wpics.oss-cn-shanghai.aliyuncs.com/wechatsync-2.0.6.zip?date=20260225) 解压后加载到 Chrome 扩展
-
+**手动安装**: 构建项目后，加载 `packages/extension/dist` 目录到 Chrome 扩展
 
 ## 支持的平台
 
@@ -74,43 +71,28 @@
 | WordPress | wordpress | 自建站 | ✅ |
 | Typecho | typecho | 自建站 | ✅ |
 
-- [提交新平台请求](https://airtable.com/shrLSJMnTC2BlmP29)
-
 ## CLI 命令行工具
 
 最简单的使用方式，无需配置 MCP，安装即用：
 
 ```bash
-npm install -g @wechatsync/cli
+npm install -g @aiwritesync/cli
 ```
 
 需要先安装 Chrome 扩展并在扩展设置中启用「MCP 连接」获取 Token，然后：
 
 ```bash
-export WECHATSYNC_TOKEN="你的token"
+export AIWRITESYNC_TOKEN="你的token"
 
 # 同步文章到多个平台
-wechatsync sync article.md -p zhihu,juejin,csdn
+aiwritesync sync article.md -p zhihu,juejin,csdn
 
 # 查看平台登录状态
-wechatsync platforms --auth
+aiwritesync platforms --auth
 
 # 从浏览器当前页面提取文章
-wechatsync extract -o article.md
+aiwritesync extract -o article.md
 ```
-
-### Claude Code Skill 集成
-
-安装后可在 Claude Code 中直接用自然语言操作：
-
-```bash
-/plugin marketplace add wechatsync/Wechatsync
-/plugin install wechatsync
-```
-
-然后直接说"把这篇文章同步到掘金和知乎"即可。
-
-详细文档见 [packages/cli/README.md](packages/cli/README.md)
 
 ## Claude Code / Claude Desktop 集成 (Anthropic MCP)
 
@@ -127,7 +109,7 @@ wechatsync extract -o article.md
   "mcpServers": {
     "sync-assistant": {
       "command": "node",
-      "args": ["/path/to/Wechatsync/packages/mcp-server/dist/index.js"],
+      "args": ["/path/to/AIWriteSync/packages/mcp-server/dist/index.js"],
       "env": {
         "MCP_TOKEN": "your-secret-token-here"
       }
@@ -157,24 +139,12 @@ wechatsync extract -o article.md
 
 详细文档见 [packages/mcp-server/README.md](packages/mcp-server/README.md)
 
-## 网页发起同步
-
-如果你是文章编辑器开发者，或有内容库需要同步多个渠道，可以使用 JS SDK：
-
-- [article-syncjs](https://github.com/wechatsync/article-syncjs) - 网页端 SDK
-- [API 文档](API.md)
-
-```javascript
-// 拉起同步任务框
-window.syncPost(article)
-```
-
 ## 开发
 
 ### 项目结构
 
 ```
-Wechatsync/
+AIWriteSync/
 ├── packages/
 │   ├── extension/     # Chrome 扩展 (MV3)
 │   ├── mcp-server/    # MCP Server (stdio/SSE)
@@ -196,67 +166,6 @@ pnpm build
 ```
 
 然后在 Chrome 中加载 `packages/extension/dist` 目录。
-
-## 更新日志
-
-### v2.0.6 (2026-02-25)
-
-- 🆕 新增东方财富 (由@mayaohua贡献)
-- 🆕 新增悬浮同步按钮（设置中开启，默认关闭）
-- 🔧 修复 WordPress / Typecho 部分图片因扩展名错误导致上传失败
-
-### v2.0.5 (2025-02-05)
-
-- 📦 代码块提取兼容性提升（支持更多格式）
-- 🔧 修复 OSChina
-- 🆕 新增 Markdown 压缩包下载（适用于 Hexo 等博客同步）
-
-完整日志见 [更新日志页面](https://www.wechatsync.com/changelog)
-
-## 贡献代码
-
-欢迎参与项目开发！
-
-- [待支持的平台列表](https://airtable.com/shrLSJMnTC2BlmP29)
-- [如何开发一个适配器](docs/adapter-spec.md)
-- [API 文档](API.md)
-
-## 使用场景
-
-- **自媒体运营者**: 公众号文章一键同步到知乎、头条、百家号等多平台，提升内容分发效率
-- **技术博主**: 技术博客同步到掘金、CSDN、SegmentFault、开源中国等技术社区
-- **内容创作者**: 告别重复复制粘贴，一次编写多处发布，多平台发文不再繁琐
-- **AI 写作用户**: 配合 Claude / GPT 等 AI 写作工具，AIGC 内容一键发布到多平台
-- **独立博主**: WordPress、Typecho 博客文章同步到各大自媒体平台引流
-
-## 常见问题
-
-**Q: 这是什么工具？**
-
-文章同步助手是一款开源免费的 Chrome 浏览器扩展，帮助自媒体作者、博主、内容创作者将文章一键同步到多个平台，避免重复复制粘贴，是自媒体运营必备的多平台发文工具。
-
-**Q: 支持同步微信公众号文章吗？**
-
-支持。可以直接从微信公众号编辑器提取文章，一键同步到知乎、头条、掘金等 25+ 平台。支持公众号文章同步到头条号、公众号同步到知乎、微信文章同步到掘金等各种场景。
-
-**Q: 支持 AI 写作工具吗？**
-
-支持 Anthropic MCP 协议，可配合 Claude Desktop、Claude Code 等 AI 工具使用，实现 AI 写作、AIGC 内容一键发布。也可以配合 ChatGPT、GPT-4 等工具生成的文章使用。
-
-**Q: 数据安全吗？会上传我的账号信息吗？**
-
-不会。所有操作在本地浏览器内完成，你的 Cookie、文章内容、账号信息不经过任何第三方服务器。代码完全开源，可自行审计：[查看源码](https://github.com/wechatsync/Wechatsync)
-
-**Q: 和微小宝、新媒体管家、简媒、蚁小二有什么区别？**
-
-文章同步助手是**开源免费**的，代码完全公开透明，无需付费订阅。作为浏览器扩展运行，数据本地存储，账号信息不上传，支持 MCP 协议可与 AI 工具集成。
-
-**Q: 如何同步文章到多个平台？**
-
-1. 安装 Chrome 浏览器扩展
-2. 登录各平台账号（知乎、掘金、头条等）
-3. 打开要同步的文章页面
-4. 点击扩展图标，选择目标平台，一键同步
 
 ## License
 

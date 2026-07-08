@@ -6,8 +6,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@wechatsync/core": ["../core/src"],
-      "@wechatsync/core/*": ["../core/src/*"]
+      "@aiwritesync/core": ["../core/src"],
+      "@aiwritesync/core/*": ["../core/src/*"]
     },
     "outDir": "dist",
     "strict": true,

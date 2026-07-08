@@ -1,7 +1,7 @@
 {
-  "name": "@wechatsync/mcp-server",
+  "name": "@aiwritesync/mcp-server",
   "version": "1.0.0",
-  "description": "MCP Server for WechatSync - bridges Claude Code with Chrome Extension",
+  "description": "MCP Server for AIWriteSync - bridges Claude Code with Chrome Extension",
   "type": "module",
   "main": "dist/index.js",
   "exports": {
@@ -9,7 +9,7 @@
     "./bridge": "./dist/exports.js"
   },
   "bin": {
-    "wechatsync-mcp": "./dist/index.js"
+    "aiwritesync-mcp": "./dist/index.js"
   },
   "files": [
     "dist"
@@ -20,7 +20,7 @@
     "start": "node dist/index.js"
   },
   "keywords": [
-    "wechatsync",
+    "aiwritesync",
     "mcp",
     "claude",
     "websocket",
@@ -28,9 +28,9 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/wechatsync/Wechatsync"
+    "url": "https://github.com/Atopos-jy/AIWriteSync"
   },
-  "author": "fun",
+  "author": "Atopos",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

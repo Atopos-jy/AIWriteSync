@@ -17,7 +17,7 @@ import {
   extractArticle as extractWithReader,
   ReaderResult,
 } from "../lib/reader";
-import { htmlToMarkdownNative, type PreprocessConfig } from "@wechatsync/core";
+import { htmlToMarkdownNative, type PreprocessConfig } from "@aiwritesync/core";
 import { createLogger } from "../lib/logger";
 import {
   preprocessContentDOM,
@@ -26,7 +26,7 @@ import {
   restoreCodeBlocks,
   type PreprocessResult,
 } from "../lib/content-processor";
-import { matchCurrentPlatform } from "@wechatsync/core";
+import { matchCurrentPlatform } from "@aiwritesync/core";
 import { initAdapters } from "../adapters";
 
 const logger = createLogger("Extractor");
@@ -351,7 +351,7 @@ function injectFloatingButton() {
   if (window.location.hostname === "mp.weixin.qq.com") return;
 
   const btn = document.createElement("div");
-  btn.id = "wechatsync-floating-btn";
+  btn.id = "aiwritesync-floating-btn";
   btn.title = "同步文章";
   btn.style.cssText = `
     position: fixed !important;
@@ -444,7 +444,7 @@ function openEditor(
 
   // 创建全屏容器
   editorContainer = document.createElement("div");
-  editorContainer.id = "wechatsync-editor-container";
+  editorContainer.id = "aiwritesync-editor-container";
   editorContainer.style.cssText = `
     position: fixed !important;
     top: 0 !important;

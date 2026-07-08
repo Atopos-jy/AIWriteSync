@@ -364,7 +364,7 @@ export { NewPlatformAdapter } from './new-platform'
 import {
   // ...existing imports
   NewPlatformAdapter,
-} from '@wechatsync/core'
+} from '@aiwritesync/core'
 
 // 添加到适配器列表
 const ADAPTER_CLASSES = [

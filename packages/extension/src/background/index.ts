@@ -1224,7 +1224,7 @@ async function handleMessage(
  */
 function createContextMenu() {
   chrome.contextMenus.create({
-    id: "wechatsync-open-editor",
+    id: "aiwritesync-open-editor",
     title: "同步助手 - 提取并编辑文章",
     contexts: ["page", "selection"],
   });
@@ -1248,7 +1248,7 @@ function getCmsIcon(type: string): string {
  * 处理右键菜单点击
  */
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId === "wechatsync-open-editor" && tab?.id) {
+  if (info.menuItemId === "aiwritesync-open-editor" && tab?.id) {
     try {
       // 获取 DSL 平台
       const dslPlatforms = await checkAllPlatformsAuth(false);
@@ -1319,7 +1319,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     if (previousVersion.startsWith("1.") && currentVersion.startsWith("2.")) {
       chrome.tabs.create({
         url:
-          "https://www.wechatsync.com/changelog?from=" +
+          "https://www.aiwritesync.com/changelog?from=" +
           previousVersion +
           "&to=" +
           currentVersion,
@@ -1331,7 +1331,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   // 首次安装时打开欢迎页
   if (details.reason === "install") {
     chrome.tabs.create({
-      url: "https://www.wechatsync.com/?utm_source=extension&utm_medium=install",
+      url: "https://www.aiwritesync.com/?utm_source=extension&utm_medium=install",
       active: true,
     });
   }

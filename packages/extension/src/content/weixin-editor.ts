@@ -3,7 +3,7 @@
  * 在编辑页面提供同步面板（可拖动、可收起）
  */
 import { createLogger } from "../lib/logger";
-import { htmlToMarkdownNative } from "@wechatsync/core";
+import { htmlToMarkdownNative } from "@aiwritesync/core";
 import {
   preprocessContentString,
   backupAndSimplifyCodeBlocks,
@@ -78,14 +78,14 @@ const logger = createLogger("WeixinEditor");
   // 显示频率限制警告
   function showRateLimitWarning(message: string) {
     // 移除已存在的警告
-    const existing = document.querySelector("#wechatsync-rate-warning");
+    const existing = document.querySelector("#aiwritesync-rate-warning");
     if (existing) existing.remove();
 
     const warning = document.createElement("div");
-    warning.id = "wechatsync-rate-warning";
+    warning.id = "aiwritesync-rate-warning";
     warning.innerHTML = `
     <style>
-      #wechatsync-rate-warning {
+      #aiwritesync-rate-warning {
         position: fixed;
         top: 20px;
         left: 50%;
@@ -109,7 +109,7 @@ const logger = createLogger("WeixinEditor");
         from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
         to { opacity: 1; transform: translateX(-50%) translateY(0); }
       }
-      #wechatsync-rate-warning .close-btn {
+      #aiwritesync-rate-warning .close-btn {
         background: none;
         border: none;
         cursor: pointer;
@@ -118,7 +118,7 @@ const logger = createLogger("WeixinEditor");
         font-size: 18px;
         line-height: 1;
       }
-      #wechatsync-rate-warning .close-btn:hover {
+      #aiwritesync-rate-warning .close-btn:hover {
         color: #533f03;
       }
     </style>
@@ -134,13 +134,13 @@ const logger = createLogger("WeixinEditor");
 
   // 注入同步面板
   async function injectSyncPanel() {
-    if (document.querySelector("#wechatsync-editor-panel")) return;
+    if (document.querySelector("#aiwritesync-editor-panel")) return;
 
     const panel = document.createElement("div");
-    panel.id = "wechatsync-editor-panel";
+    panel.id = "aiwritesync-editor-panel";
     panel.innerHTML = `
     <style>
-      #wechatsync-editor-panel {
+      #aiwritesync-editor-panel {
         position: fixed;
         right: 20px;
         bottom: 80px;
@@ -149,7 +149,7 @@ const logger = createLogger("WeixinEditor");
         font-size: 13px;
       }
 
-      #wechatsync-editor-panel * {
+      #aiwritesync-editor-panel * {
         box-sizing: border-box;
       }
 
@@ -451,7 +451,7 @@ const logger = createLogger("WeixinEditor");
     const closeBtn = document.getElementById("ws-close")!;
     const historyLink = document.getElementById("ws-history")!;
     const popupLink = document.getElementById("ws-popup")!;
-    const container = document.getElementById("wechatsync-editor-panel")!;
+    const container = document.getElementById("aiwritesync-editor-panel")!;
 
     // 展开面板
     fab.addEventListener("click", () => {

@@ -7,7 +7,7 @@ import {
   type PlatformMeta,
   type Article,
   type SyncResult,
-} from "@wechatsync/core";
+} from "@aiwritesync/core";
 import { createExtensionRuntime } from "../runtime/extension";
 import { createLogger } from "../lib/logger";
 import {
@@ -48,14 +48,14 @@ import {
   SegmentfaultAdapter,
   CnblogsAdapter,
   ZipDownloadAdapter,
-} from "@wechatsync/core";
+} from "@aiwritesync/core";
 
 // 私有适配器 - 通过 glob 动态加载（文件不存在时为空对象，不会报错）
-// 使用 Vite alias @wechatsync/core 确保构建时正确解析
+// 使用 Vite alias @aiwritesync/core 确保构建时正确解析
 const privateModules = import.meta.glob<Record<string, unknown>>(
   [
-    "@wechatsync/core/adapters/platforms/x.ts",
-    "@wechatsync/core/adapters/platforms/xiaohongshu.ts",
+    "@aiwritesync/core/adapters/platforms/x.ts",
+    "@aiwritesync/core/adapters/platforms/xiaohongshu.ts",
   ],
   { eager: true },
 );

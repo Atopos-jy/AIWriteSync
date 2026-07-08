@@ -1,5 +1,5 @@
-import type { RuntimeInterface, RuntimeConfig } from '@wechatsync/core'
-import type { Cookie, HeaderRule } from '@wechatsync/core'
+import type { RuntimeInterface, RuntimeConfig } from '@aiwritesync/core'
+import type { Cookie, HeaderRule } from '@aiwritesync/core'
 
 /**
  * Chrome 扩展运行时实现

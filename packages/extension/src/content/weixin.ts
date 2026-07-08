@@ -3,7 +3,7 @@
  * 优化的同步按钮体验
  */
 
-import { htmlToMarkdownNative } from "@wechatsync/core";
+import { htmlToMarkdownNative } from "@aiwritesync/core";
 import {
   preprocessContentDOM,
   backupAndSimplifyCodeBlocks,
@@ -65,14 +65,14 @@ import {
     if (!articleContent) return;
 
     // 检查是否已注入
-    if (document.querySelector("#wechatsync-fab")) return;
+    if (document.querySelector("#aiwritesync-fab")) return;
 
     // 创建悬浮按钮容器
     const container = document.createElement("div");
-    container.id = "wechatsync-fab";
+    container.id = "aiwritesync-fab";
     container.innerHTML = `
     <style>
-      #wechatsync-fab {
+      #aiwritesync-fab {
         position: fixed;
         right: 24px;
         bottom: 88px;
@@ -81,7 +81,7 @@ import {
       }
 
       /* 主按钮 - 胶囊形状带文字 */
-      .wechatsync-main-btn {
+      .aiwritesync-main-btn {
         height: 40px;
         padding: 0 16px;
         border-radius: 20px;
@@ -99,12 +99,12 @@ import {
         font-weight: 500;
       }
 
-      .wechatsync-main-btn:hover {
+      .aiwritesync-main-btn:hover {
         transform: scale(1.05);
         box-shadow: 0 6px 20px rgba(7, 193, 96, 0.45);
       }
 
-      .wechatsync-main-btn svg {
+      .aiwritesync-main-btn svg {
         width: 18px;
         height: 18px;
         fill: white;
@@ -112,7 +112,7 @@ import {
       }
 
       /* 同步中旋转动画 */
-      .wechatsync-main-btn.syncing svg {
+      .aiwritesync-main-btn.syncing svg {
         animation: spin 1s linear infinite;
       }
 
@@ -122,17 +122,17 @@ import {
       }
 
       /* 成功状态 */
-      .wechatsync-main-btn.success {
+      .aiwritesync-main-btn.success {
         background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
       }
 
       /* 失败状态 */
-      .wechatsync-main-btn.error {
+      .aiwritesync-main-btn.error {
         background: linear-gradient(135deg, #ff4d4f 0%, #cf1322 100%);
       }
 
       /* 平台展开面板 */
-      .wechatsync-panel {
+      .aiwritesync-panel {
         position: absolute;
         bottom: 60px;
         right: 0;
@@ -147,14 +147,14 @@ import {
         transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
       }
 
-      #wechatsync-fab:hover .wechatsync-panel,
-      #wechatsync-fab.expanded .wechatsync-panel {
+      #aiwritesync-fab:hover .aiwritesync-panel,
+      #aiwritesync-fab.expanded .aiwritesync-panel {
         opacity: 1;
         visibility: visible;
         transform: translateY(0) scale(1);
       }
 
-      .wechatsync-panel-header {
+      .aiwritesync-panel-header {
         font-size: 12px;
         color: #999;
         margin-bottom: 8px;
@@ -163,14 +163,14 @@ import {
       }
 
       /* 平台列表 */
-      .wechatsync-platforms {
+      .aiwritesync-platforms {
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
         margin-bottom: 12px;
       }
 
-      .wechatsync-platform {
+      .aiwritesync-platform {
         display: flex;
         align-items: center;
         gap: 6px;
@@ -183,40 +183,40 @@ import {
         font-size: 12px;
       }
 
-      .wechatsync-platform:hover {
+      .aiwritesync-platform:hover {
         background: #e8f5e9;
       }
 
-      .wechatsync-platform.selected {
+      .aiwritesync-platform.selected {
         border-color: #07c160;
         background: #e8f5e9;
       }
 
-      .wechatsync-platform img {
+      .aiwritesync-platform img {
         width: 16px;
         height: 16px;
         border-radius: 3px;
       }
 
-      .wechatsync-platform .status-icon {
+      .aiwritesync-platform .status-icon {
         margin-left: auto;
       }
 
-      .wechatsync-platform .status-icon.success {
+      .aiwritesync-platform .status-icon.success {
         color: #52c41a;
       }
 
-      .wechatsync-platform .status-icon.error {
+      .aiwritesync-platform .status-icon.error {
         color: #ff4d4f;
       }
 
       /* 操作按钮 */
-      .wechatsync-actions {
+      .aiwritesync-actions {
         display: flex;
         gap: 8px;
       }
 
-      .wechatsync-sync-btn {
+      .aiwritesync-sync-btn {
         flex: 1;
         padding: 8px 12px;
         border: none;
@@ -229,16 +229,16 @@ import {
         transition: all 0.15s;
       }
 
-      .wechatsync-sync-btn:hover {
+      .aiwritesync-sync-btn:hover {
         background: #06ad56;
       }
 
-      .wechatsync-sync-btn:disabled {
+      .aiwritesync-sync-btn:disabled {
         background: #ccc;
         cursor: not-allowed;
       }
 
-      .wechatsync-more-btn {
+      .aiwritesync-more-btn {
         padding: 8px 12px;
         border: 1px solid #e0e0e0;
         border-radius: 6px;
@@ -249,13 +249,13 @@ import {
         transition: all 0.15s;
       }
 
-      .wechatsync-more-btn:hover {
+      .aiwritesync-more-btn:hover {
         border-color: #07c160;
         color: #07c160;
       }
 
       /* 结果提示 */
-      .wechatsync-toast {
+      .aiwritesync-toast {
         position: absolute;
         bottom: 60px;
         right: 0;
@@ -271,27 +271,27 @@ import {
         transition: all 0.2s;
       }
 
-      .wechatsync-toast.show {
+      .aiwritesync-toast.show {
         opacity: 1;
         visibility: visible;
         transform: translateY(0);
       }
 
-      .wechatsync-toast.success {
+      .aiwritesync-toast.success {
         border-left: 3px solid #52c41a;
       }
 
-      .wechatsync-toast.error {
+      .aiwritesync-toast.error {
         border-left: 3px solid #ff4d4f;
       }
 
-      .wechatsync-toast.warning {
+      .aiwritesync-toast.warning {
         border-left: 3px solid #faad14;
         background: #fffbe6;
       }
 
       /* 加载状态 */
-      .wechatsync-loading {
+      .aiwritesync-loading {
         text-align: center;
         padding: 20px;
         color: #999;
@@ -299,13 +299,13 @@ import {
       }
 
       /* 同步结果列表 */
-      .wechatsync-results {
+      .aiwritesync-results {
         margin-bottom: 12px;
         max-height: 200px;
         overflow-y: auto;
       }
 
-      .wechatsync-result-item {
+      .aiwritesync-result-item {
         display: flex;
         align-items: center;
         gap: 8px;
@@ -315,60 +315,60 @@ import {
         font-size: 12px;
       }
 
-      .wechatsync-result-item.success {
+      .aiwritesync-result-item.success {
         background: #f6ffed;
         border: 1px solid #b7eb8f;
       }
 
-      .wechatsync-result-item.error {
+      .aiwritesync-result-item.error {
         background: #fff2f0;
         border: 1px solid #ffccc7;
       }
 
-      .wechatsync-result-item img {
+      .aiwritesync-result-item img {
         width: 16px;
         height: 16px;
         border-radius: 3px;
       }
 
-      .wechatsync-result-item .name {
+      .aiwritesync-result-item .name {
         flex: 1;
       }
 
-      .wechatsync-result-item .status {
+      .aiwritesync-result-item .status {
         font-size: 11px;
       }
 
-      .wechatsync-result-item .status.success {
+      .aiwritesync-result-item .status.success {
         color: #52c41a;
         background: none;
         border: none;
       }
 
-      .wechatsync-result-item .status.error {
+      .aiwritesync-result-item .status.error {
         color: #ff4d4f;
         background: none;
         border: none;
       }
 
-      .wechatsync-result-item a {
+      .aiwritesync-result-item a {
         color: #1890ff;
         text-decoration: none;
         font-size: 11px;
       }
 
-      .wechatsync-result-item a:hover {
+      .aiwritesync-result-item a:hover {
         text-decoration: underline;
       }
 
       /* 同步进度列表 */
-      .wechatsync-progress {
+      .aiwritesync-progress {
         margin-bottom: 12px;
         max-height: 200px;
         overflow-y: auto;
       }
 
-      .wechatsync-progress-item {
+      .aiwritesync-progress-item {
         display: flex;
         align-items: center;
         gap: 8px;
@@ -379,41 +379,41 @@ import {
         background: #f9f9f9;
       }
 
-      .wechatsync-progress-item.active {
+      .aiwritesync-progress-item.active {
         background: #e6f7e6;
       }
 
-      .wechatsync-progress-item.success {
+      .aiwritesync-progress-item.success {
         background: #f6ffed;
       }
 
-      .wechatsync-progress-item.error {
+      .aiwritesync-progress-item.error {
         background: #fff2f0;
       }
 
-      .wechatsync-progress-item.pending {
+      .aiwritesync-progress-item.pending {
         color: #999;
       }
 
-      .wechatsync-progress-icon {
+      .aiwritesync-progress-icon {
         width: 14px;
         text-align: center;
         flex-shrink: 0;
         font-size: 11px;
       }
 
-      .wechatsync-progress-item.success .wechatsync-progress-icon { color: #52c41a; }
-      .wechatsync-progress-item.error .wechatsync-progress-icon { color: #ff4d4f; }
-      .wechatsync-progress-item.active .wechatsync-progress-icon { color: #07c160; }
+      .aiwritesync-progress-item.success .aiwritesync-progress-icon { color: #52c41a; }
+      .aiwritesync-progress-item.error .aiwritesync-progress-icon { color: #ff4d4f; }
+      .aiwritesync-progress-item.active .aiwritesync-progress-icon { color: #07c160; }
 
-      .wechatsync-progress-name {
+      .aiwritesync-progress-name {
         flex: 1;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
 
-      .wechatsync-progress-status {
+      .aiwritesync-progress-status {
         font-size: 11px;
         color: #666;
         flex-shrink: 0;
@@ -423,10 +423,10 @@ import {
         white-space: nowrap;
       }
 
-      .wechatsync-progress-item.error .wechatsync-progress-status { color: #ff4d4f; }
+      .aiwritesync-progress-item.error .aiwritesync-progress-status { color: #ff4d4f; }
 
       /* 底部链接 */
-      .wechatsync-footer {
+      .aiwritesync-footer {
         display: flex;
         justify-content: space-between;
         padding-top: 8px;
@@ -434,18 +434,18 @@ import {
         margin-top: 8px;
       }
 
-      .wechatsync-footer a {
+      .aiwritesync-footer a {
         color: #999;
         text-decoration: none;
         font-size: 11px;
       }
 
-      .wechatsync-footer a:hover {
+      .aiwritesync-footer a:hover {
         color: #07c160;
       }
 
       /* 发布选项 */
-      .wechatsync-publish-option {
+      .aiwritesync-publish-option {
         display: flex;
         align-items: center;
         gap: 6px;
@@ -456,65 +456,65 @@ import {
         margin-bottom: 8px;
       }
 
-      .wechatsync-publish-option input[type="checkbox"] {
+      .aiwritesync-publish-option input[type="checkbox"] {
         width: 14px;
         height: 14px;
         cursor: pointer;
       }
 
-      .wechatsync-publish-option label {
+      .aiwritesync-publish-option label {
         cursor: pointer;
         user-select: none;
       }
 
-      .wechatsync-publish-option .warning-text {
+      .aiwritesync-publish-option .warning-text {
         color: #ff4d4f;
         font-size: 11px;
         margin-left: 4px;
       }
     </style>
 
-    <div class="wechatsync-panel">
-      <div class="wechatsync-panel-header" id="wechatsync-panel-header">选择同步平台</div>
+    <div class="aiwritesync-panel">
+      <div class="aiwritesync-panel-header" id="aiwritesync-panel-header">选择同步平台</div>
 
       <!-- 同步结果区域（同步后显示） -->
-      <div class="wechatsync-results" id="wechatsync-results" style="display: none;"></div>
+      <div class="aiwritesync-results" id="aiwritesync-results" style="display: none;"></div>
 
       <!-- 同步进度区域（同步中显示） -->
-      <div class="wechatsync-progress" id="wechatsync-progress" style="display: none;"></div>
+      <div class="aiwritesync-progress" id="aiwritesync-progress" style="display: none;"></div>
 
       <!-- 平台选择区域 -->
-      <div class="wechatsync-platforms" id="wechatsync-platforms">
-        <div class="wechatsync-loading">加载中...</div>
+      <div class="aiwritesync-platforms" id="aiwritesync-platforms">
+        <div class="aiwritesync-loading">加载中...</div>
       </div>
 
       <!-- 发布选项 -->
-      <div class="wechatsync-publish-option">
-        <input type="checkbox" id="wechatsync-publish-directly" />
-        <label for="wechatsync-publish-directly">
+      <div class="aiwritesync-publish-option">
+        <input type="checkbox" id="aiwritesync-publish-directly" />
+        <label for="aiwritesync-publish-directly">
           直接发布
           <span class="warning-text">(默认保存为草稿)</span>
         </label>
       </div>
 
-      <div class="wechatsync-actions">
-        <button class="wechatsync-sync-btn" id="wechatsync-sync-btn" disabled>
+      <div class="aiwritesync-actions">
+        <button class="aiwritesync-sync-btn" id="aiwritesync-sync-btn" disabled>
           同步到选中平台
         </button>
-        <button class="wechatsync-more-btn" id="wechatsync-more-btn" title="更多选项">
+        <button class="aiwritesync-more-btn" id="aiwritesync-more-btn" title="更多选项">
           ⋯
         </button>
       </div>
 
-      <div class="wechatsync-footer">
-        <a href="javascript:void(0)" id="wechatsync-history-link">同步历史</a>
-        <a href="javascript:void(0)" id="wechatsync-add-cms-link">添加站点</a>
+      <div class="aiwritesync-footer">
+        <a href="javascript:void(0)" id="aiwritesync-history-link">同步历史</a>
+        <a href="javascript:void(0)" id="aiwritesync-add-cms-link">添加站点</a>
       </div>
     </div>
 
-    <div class="wechatsync-toast" id="wechatsync-toast"></div>
+    <div class="aiwritesync-toast" id="aiwritesync-toast"></div>
 
-    <button class="wechatsync-main-btn" id="wechatsync-main-btn" title="同步文章到多平台">
+    <button class="aiwritesync-main-btn" id="aiwritesync-main-btn" title="同步文章到多平台">
       <svg viewBox="0 0 24 24">
         <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
       </svg>
@@ -526,22 +526,22 @@ import {
 
     // 绑定事件
     const mainBtn = document.getElementById(
-      "wechatsync-main-btn",
+      "aiwritesync-main-btn",
     ) as HTMLButtonElement;
     const syncBtn = document.getElementById(
-      "wechatsync-sync-btn",
+      "aiwritesync-sync-btn",
     ) as HTMLButtonElement;
     const moreBtn = document.getElementById(
-      "wechatsync-more-btn",
+      "aiwritesync-more-btn",
     ) as HTMLButtonElement;
-    const platformsContainer = document.getElementById("wechatsync-platforms")!;
-    const resultsContainer = document.getElementById("wechatsync-results")!;
-    const progressContainer = document.getElementById("wechatsync-progress")!;
-    const panelHeader = document.getElementById("wechatsync-panel-header")!;
-    const historyLink = document.getElementById("wechatsync-history-link")!;
-    const addCmsLink = document.getElementById("wechatsync-add-cms-link")!;
+    const platformsContainer = document.getElementById("aiwritesync-platforms")!;
+    const resultsContainer = document.getElementById("aiwritesync-results")!;
+    const progressContainer = document.getElementById("aiwritesync-progress")!;
+    const panelHeader = document.getElementById("aiwritesync-panel-header")!;
+    const historyLink = document.getElementById("aiwritesync-history-link")!;
+    const addCmsLink = document.getElementById("aiwritesync-add-cms-link")!;
     const publishDirectlyCheckbox = document.getElementById(
-      "wechatsync-publish-directly",
+      "aiwritesync-publish-directly",
     ) as HTMLInputElement;
 
     // 加载平台列表
@@ -600,7 +600,7 @@ import {
         renderPlatforms(lastSelected);
       } catch (error) {
         platformsContainer.innerHTML =
-          '<div class="wechatsync-loading">加载失败</div>';
+          '<div class="aiwritesync-loading">加载失败</div>';
       }
     }
 
@@ -610,13 +610,13 @@ import {
     function renderPlatforms(selectedIds: string[] = []) {
       if (state.platforms.length === 0) {
         platformsContainer.innerHTML = `
-        <div class="wechatsync-loading">
+        <div class="aiwritesync-loading">
           暂无已登录平台<br>
-          <a href="javascript:void(0)" id="wechatsync-login-link" style="color: #07c160;">去登录 →</a>
+          <a href="javascript:void(0)" id="aiwritesync-login-link" style="color: #07c160;">去登录 →</a>
         </div>
       `;
         document
-          .getElementById("wechatsync-login-link")
+          .getElementById("aiwritesync-login-link")
           ?.addEventListener("click", (e) => {
             e.preventDefault();
             chrome.runtime.sendMessage({ type: "OPEN_SYNC_PAGE" });
@@ -636,7 +636,7 @@ import {
           }
 
           return `
-        <div class="wechatsync-platform ${isSelected ? "selected" : ""}" data-id="${p.id}">
+        <div class="aiwritesync-platform ${isSelected ? "selected" : ""}" data-id="${p.id}">
           <img src="${p.icon}" alt="${p.name}" onerror="this.style.display='none'">
           <span>${p.name}</span>
           ${statusIcon}
@@ -647,7 +647,7 @@ import {
 
       // 绑定平台选择事件
       platformsContainer
-        .querySelectorAll(".wechatsync-platform")
+        .querySelectorAll(".aiwritesync-platform")
         .forEach((el) => {
           el.addEventListener("click", () => {
             el.classList.toggle("selected");
@@ -663,7 +663,7 @@ import {
      */
     function updateSyncButton() {
       const selected = platformsContainer.querySelectorAll(
-        ".wechatsync-platform.selected",
+        ".aiwritesync-platform.selected",
       );
       syncBtn.disabled = selected.length === 0;
       syncBtn.textContent =
@@ -705,7 +705,7 @@ import {
       // 获取选中的平台
       const selectedPlatforms: string[] = [];
       platformsContainer
-        .querySelectorAll(".wechatsync-platform.selected")
+        .querySelectorAll(".aiwritesync-platform.selected")
         .forEach((el) => {
           selectedPlatforms.push(el.getAttribute("data-id")!);
         });
@@ -793,9 +793,9 @@ import {
       type: "success" | "error" | "warning",
       duration = 3000,
     ) {
-      const toast = document.getElementById("wechatsync-toast")!;
+      const toast = document.getElementById("aiwritesync-toast")!;
       toast.textContent = message;
-      toast.className = `wechatsync-toast show ${type}`;
+      toast.className = `aiwritesync-toast show ${type}`;
 
       setTimeout(() => {
         toast.classList.remove("show");
@@ -837,28 +837,28 @@ import {
         if (result) {
           // 已完成
           html += `
-          <div class="wechatsync-progress-item ${result.success ? "success" : "error"}">
-            <span class="wechatsync-progress-icon">${result.success ? "✓" : "✗"}</span>
-            <span class="wechatsync-progress-name">${platform?.name || platformId}</span>
-            <span class="wechatsync-progress-status">${result.success ? "完成" : result.error || "失败"}</span>
+          <div class="aiwritesync-progress-item ${result.success ? "success" : "error"}">
+            <span class="aiwritesync-progress-icon">${result.success ? "✓" : "✗"}</span>
+            <span class="aiwritesync-progress-name">${platform?.name || platformId}</span>
+            <span class="aiwritesync-progress-status">${result.success ? "完成" : result.error || "失败"}</span>
           </div>
         `;
         } else if (progress) {
           // 进行中
           html += `
-          <div class="wechatsync-progress-item active">
-            <span class="wechatsync-progress-icon">⟳</span>
-            <span class="wechatsync-progress-name">${platform?.name || platformId}</span>
-            <span class="wechatsync-progress-status">${getStageText(progress)}</span>
+          <div class="aiwritesync-progress-item active">
+            <span class="aiwritesync-progress-icon">⟳</span>
+            <span class="aiwritesync-progress-name">${platform?.name || platformId}</span>
+            <span class="aiwritesync-progress-status">${getStageText(progress)}</span>
           </div>
         `;
         } else {
           // 等待中
           html += `
-          <div class="wechatsync-progress-item pending">
-            <span class="wechatsync-progress-icon">○</span>
-            <span class="wechatsync-progress-name">${platform?.name || platformId}</span>
-            <span class="wechatsync-progress-status">等待中</span>
+          <div class="aiwritesync-progress-item pending">
+            <span class="aiwritesync-progress-icon">○</span>
+            <span class="aiwritesync-progress-name">${platform?.name || platformId}</span>
+            <span class="aiwritesync-progress-status">等待中</span>
           </div>
         `;
         }
@@ -899,7 +899,7 @@ import {
           }
 
           return `
-        <div class="wechatsync-result-item ${statusClass}">
+        <div class="aiwritesync-result-item ${statusClass}">
           <img src="${platform?.icon || ""}" alt="${platform?.name || r.platform}" onerror="this.style.display='none'">
           <span class="name">${platform?.name || r.platform}</span>
           <span class="status ${statusClass}">${statusText}</span>

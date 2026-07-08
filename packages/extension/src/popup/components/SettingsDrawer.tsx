@@ -289,7 +289,7 @@ export function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
             </div>
 
             <a
-              href="https://github.com/wechatsync/Wechatsync"
+              href="https://github.com/aiwritesync/AIWriteSync"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2 text-xs text-primary hover:underline"

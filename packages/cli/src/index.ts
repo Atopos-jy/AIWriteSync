@@ -4,9 +4,9 @@
  * 命令行同步文章到多个内容平台
  *
  * 使用方式:
- *   wechatsync sync article.md --platforms zhihu,juejin
- *   wechatsync platforms
- *   wechatsync auth
+ *   aiwritesync sync article.md --platforms zhihu,juejin
+ *   aiwritesync platforms
+ *   aiwritesync auth
  */
 import { Command } from 'commander'
 import chalk from 'chalk'
@@ -14,15 +14,15 @@ import ora from 'ora'
 import open from 'open'
 import fs from 'fs'
 import path from 'path'
-import { ExtensionBridge } from '@wechatsync/mcp-server/bridge'
-import type { PlatformInfo, SyncResult } from '@wechatsync/mcp-server/bridge'
+import { ExtensionBridge } from '@aiwritesync/mcp-server/bridge'
+import type { PlatformInfo, SyncResult } from '@aiwritesync/mcp-server/bridge'
 
 const WS_PORT = parseInt(process.env.SYNC_WS_PORT || '9527', 10)
 
 // 官网和安装地址
-const WEBSITE_URL = 'https://www.wechatsync.com'
-const EXTENSION_URL = 'https://www.wechatsync.com/#install'
-const GITHUB_URL = 'https://github.com/wechatsync/Wechatsync'
+const WEBSITE_URL = 'https://www.aiwritesync.com'
+const EXTENSION_URL = 'https://www.aiwritesync.com/#install'
+const GITHUB_URL = 'https://github.com/aiwritesync/AIWriteSync'
 
 const program = new Command()
 
@@ -30,7 +30,7 @@ const program = new Command()
 let connectionTimeout = 30000
 
 program
-  .name('wechatsync')
+  .name('aiwritesync')
   .description('同步文章到多个内容平台 (知乎、掘金、CSDN 等)')
   .version('1.0.0')
   .option('--timeout <ms>', '等待 Extension 连接超时（毫秒）', '30000')
@@ -59,7 +59,7 @@ function showInstallGuide(): void {
   console.log(`  2. 在扩展设置中启用 ${chalk.cyan('MCP 连接')}，获取 Token`)
   console.log()
   console.log(`  3. 配置环境变量:`)
-  console.log(`     ${chalk.cyan('export WECHATSYNC_TOKEN="你的token"')}`)
+  console.log(`     ${chalk.cyan('export AIWRITESYNC_TOKEN="你的token"')}`)
   console.log()
   console.log(`  4. 在各平台 (知乎、掘金等) 登录你的账号`)
   console.log()
@@ -460,7 +460,7 @@ async function createBridge(): Promise<ExtensionBridge | null> {
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
       spinner.fail(`端口 ${WS_PORT} 已被占用`)
-      console.log(chalk.gray('可能已有其他 wechatsync 实例在运行'))
+      console.log(chalk.gray('可能已有其他 aiwritesync 实例在运行'))
       return null
     }
     throw error

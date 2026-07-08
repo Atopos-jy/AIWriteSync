@@ -1,10 +1,10 @@
 {
-  "name": "@wechatsync/cli",
+  "name": "@aiwritesync/cli",
   "version": "1.0.1",
-  "description": "WechatSync CLI - 命令行同步文章到多个平台",
+  "description": "AIWriteSync CLI - 命令行同步文章到多个平台",
   "main": "dist/index.js",
   "bin": {
-    "wechatsync": "./dist/index.js"
+    "aiwritesync": "./dist/index.js"
   },
   "files": [
     "dist"
@@ -15,7 +15,7 @@
     "start": "node dist/index.js"
   },
   "keywords": [
-    "wechat",
+    "ai",
     "sync",
     "markdown",
     "zhihu",
@@ -23,14 +23,13 @@
     "csdn",
     "publish",
     "article",
-    "claude",
-    "ai"
+    "claude"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/wechatsync/Wechatsync"
+    "url": "https://github.com/Atopos-jy/AIWriteSync"
   },
-  "author": "fun",
+  "author": "Atopos",
   "license": "MIT",
   "dependencies": {
     "commander": "^12.1.0",
@@ -40,7 +39,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@wechatsync/mcp-server": "workspace:*",
+    "@aiwritesync/mcp-server": "workspace:*",
     "@types/node": "^22.10.2",
     "@types/ws": "^8.5.13",
     "tsup": "^8.5.1",

@@ -4,10 +4,10 @@
   "description": "Sync articles to 20+ content platforms (Zhihu, Juejin, CSDN, Toutiao, Weibo, etc.)",
   "author": {
     "name": "fun",
-    "url": "https://github.com/wechatsync"
+    "url": "https://github.com/aiwritesync"
   },
-  "homepage": "https://www.wechatsync.com",
-  "repository": "https://github.com/wechatsync/Wechatsync",
+  "homepage": "https://www.aiwritesync.com",
+  "repository": "https://github.com/aiwritesync/AIWriteSync",
   "license": "MIT",
   "keywords": ["sync", "article", "blog", "zhihu", "juejin", "csdn", "weibo", "content"],
   "skills": ["./skills/"]

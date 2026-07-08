@@ -9,7 +9,7 @@
  * 5. Service Worker 只做图片上传 + 调用 API
  */
 
-import { htmlToMarkdownNative, type PreprocessConfig } from "@wechatsync/core";
+import { htmlToMarkdownNative, type PreprocessConfig } from "@aiwritesync/core";
 import { createLogger } from "./logger";
 
 const logger = createLogger("ContentProcessor");

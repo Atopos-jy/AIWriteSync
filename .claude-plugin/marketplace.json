@@ -1,8 +1,8 @@
 {
-  "name": "wechatsync",
+  "name": "aiwritesync",
   "owner": {
-    "name": "wechatsync",
-    "url": "https://github.com/wechatsync"
+    "name": "aiwritesync",
+    "url": "https://github.com/aiwritesync"
   },
   "plugins": [
     {
