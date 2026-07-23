@@ -1501,6 +1501,8 @@ export function EditorApp() {
                     setTitleSuggestions(titles);
                     setSelectedTitleIndex(0);
                     setShowTitlePanel(true);
+                  } else if (aiError) {
+                    setError(aiError);
                   }
                 }}
                 disabled={aiLoading === "title"}
@@ -1744,11 +1746,11 @@ export function EditorApp() {
       )}
 
       {/* 错误提示 */}
-      {error && (
+      {(error || aiError) && (
         <div className="fixed bottom-4 left-4 bg-red-50 border border-red-200 rounded-lg p-4 max-w-sm z-50">
-          <p className="text-red-700 text-sm">{error}</p>
+          <p className="text-red-700 text-sm">{aiError || error}</p>
           <button
-            onClick={() => setError(null)}
+            onClick={() => { setError(null); clearAIError(); }}
             className="mt-2 text-red-500 hover:underline text-sm"
           >
             关闭
