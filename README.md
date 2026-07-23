@@ -1,14 +1,32 @@
-# AI 文章同步助手 (AIWriteSync)
+# 文稿 AI 同步助手 (AIWriteSync)
 
 ![](https://img.shields.io/github/v/release/Atopos-jy/AIWriteSync.svg)
 ![](https://img.shields.io/github/last-commit/Atopos-jy/AIWriteSync)
 ![](https://img.shields.io/github/issues/Atopos-jy/AIWriteSync)
+[![](https://img.shields.io/badge/Microsoft%20Edge-已上架-blue?logo=microsoftedge)](https://microsoftedge.microsoft.com/addons/detail/%E6%96%87%E7%A8%BFai%E5%90%8C%E6%AD%A5%E5%8A%A9%E6%89%8B/lhgcmkdmegfkcdcnddamplcciliembod)
 
-**开源免费**的跨平台文章同步工具 | Chrome 浏览器扩展 | 自媒体内容分发神器
+**开源免费**的跨平台文章同步工具 | 浏览器扩展 | 自媒体内容分发神器
 
 一键同步微信公众号文章到知乎、头条、掘金、小红书、CSDN 等 25+ 平台，支持 WordPress 等自建博客，告别重复复制粘贴。
 
 > 🔥 支持 **Anthropic MCP 协议**，可在 Claude Desktop / Claude Code 中通过 AI 一键发布文章
+>
+> 📦 已在 [**微软 Edge 扩展商店**](https://microsoftedge.microsoft.com/addons/detail/%E6%96%87%E7%A8%BFai%E5%90%8C%E6%AD%A5%E5%8A%A9%E6%89%8B/lhgcmkdmegfkcdcnddamplcciliembod) 上架，直接安装即可使用
+
+---
+
+## 🙏 致谢
+
+本项目是基于 [WeChatSync](https://github.com/Yrobot/Wechatsync) 开源项目的二次开发版本，感谢原作者 **Yrobot** 及所有 [WeChatSync 贡献者](https://github.com/Yrobot/Wechatsync/graphs/contributors) 的优秀工作与开源精神。
+
+在此基础上，我们进行了以下增强：
+- 🎨 重塑品牌形象与 UI 界面
+- 🌐 支持 Microsoft Edge 浏览器并上架扩展商店
+- 🤖 集成 Anthropic MCP 协议，支持 AI 驱动的内容发布
+- 🖥️ 新增 CLI 命令行工具，满足自动化场景
+- 🔧 精简架构，提升稳定性与用户体验
+
+---
 
 ## 工作原理
 
@@ -39,9 +57,13 @@
 
 ## 安装方式
 
-### Chrome 浏览器扩展安装
+### Microsoft Edge 扩展商店（推荐）
 
-**手动安装**: 构建项目后，加载 `packages/extension/dist` 目录到 Chrome 扩展
+直接在 [**Edge 扩展商店**](https://microsoftedge.microsoft.com/addons/detail/%E6%96%87%E7%A8%BFai%E5%90%8C%E6%AD%A5%E5%8A%A9%E6%89%8B/lhgcmkdmegfkcdcnddamplcciliembod) 搜索「**文稿 AI 同步助手**」一键安装即可。
+
+### Chrome 浏览器手动安装
+
+构建项目后，加载 `packages/extension/dist` 目录到 Chrome 扩展。
 
 ## 支持的平台
 
