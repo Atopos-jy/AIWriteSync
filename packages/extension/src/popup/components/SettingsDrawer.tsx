@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, Plug, PlugZap, Plus, Trash2, ExternalLink, ChevronRight } from 'lucide-react'
+import { X, Plug, PlugZap, Plus, Trash2, ExternalLink, ChevronRight, Sparkles, Eye, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { trackHelpSeeking, trackFeatureDiscovery } from '../../lib/analytics'
 
@@ -27,6 +27,13 @@ export function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
   const [loading, setLoading] = useState(false)
   const [floatingButtonEnabled, setFloatingButtonEnabled] = useState(false)
 
+  // AI 配置
+  const [aiBaseUrl, setAiBaseUrl] = useState('https://api.openai.com/v1')
+  const [aiApiKey, setAiApiKey] = useState('')
+  const [aiModel, setAiModel] = useState('gpt-4o-mini')
+  const [showApiKey, setShowApiKey] = useState(false)
+  const [aiSaved, setAiSaved] = useState(false)
+
   // 获取状态
   useEffect(() => {
     if (!open) return
@@ -50,6 +57,16 @@ export function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
     // 悬浮按钮设置
     chrome.storage.local.get('floatingButtonEnabled', (result) => {
       setFloatingButtonEnabled(result.floatingButtonEnabled ?? false)
+    })
+
+    // AI 配置
+    chrome.storage.local.get('aiConfig', (result) => {
+      const config = result.aiConfig
+      if (config) {
+        setAiBaseUrl(config.baseUrl || 'https://api.openai.com/v1')
+        setAiApiKey(config.apiKey || '')
+        setAiModel(config.model || 'gpt-4o-mini')
+      }
     })
   }, [open])
 
@@ -194,6 +211,80 @@ export function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
                 )}
               </div>
             )}
+          </div>
+
+          {/* AI 润色设置 */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+              <Sparkles className="w-4 h-4" />
+              AI 润色
+            </h3>
+
+            <div className="space-y-2">
+              <div>
+                <label className="text-xs text-muted-foreground">API 地址</label>
+                <input
+                  type="text"
+                  value={aiBaseUrl}
+                  onChange={(e) => setAiBaseUrl(e.target.value)}
+                  placeholder="https://api.openai.com/v1"
+                  className="w-full mt-1 px-3 py-1.5 text-sm border rounded bg-background focus:outline-none focus:border-primary"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground">API Key</label>
+                <div className="relative mt-1">
+                  <input
+                    type={showApiKey ? 'text' : 'password'}
+                    value={aiApiKey}
+                    onChange={(e) => setAiApiKey(e.target.value)}
+                    placeholder="sk-..."
+                    className="w-full px-3 py-1.5 pr-8 text-sm border rounded bg-background focus:outline-none focus:border-primary"
+                  />
+                  <button
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    title={showApiKey ? '隐藏' : '显示'}
+                  >
+                    {showApiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-muted-foreground">模型</label>
+                <input
+                  type="text"
+                  value={aiModel}
+                  onChange={(e) => setAiModel(e.target.value)}
+                  placeholder="gpt-4o-mini"
+                  className="w-full mt-1 px-3 py-1.5 text-sm border rounded bg-background focus:outline-none focus:border-primary"
+                />
+              </div>
+
+              <button
+                onClick={() => {
+                  const config = {
+                    baseUrl: aiBaseUrl,
+                    apiKey: aiApiKey,
+                    model: aiModel,
+                  }
+                  chrome.storage.local.set({ aiConfig: config }, () => {
+                    setAiSaved(true)
+                    setTimeout(() => setAiSaved(false), 2000)
+                  })
+                }}
+                className={cn(
+                  'w-full py-1.5 text-sm rounded transition-colors',
+                  aiSaved
+                    ? 'bg-green-500 text-white'
+                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                )}
+              >
+                {aiSaved ? '已保存 ✓' : '保存配置'}
+              </button>
+            </div>
           </div>
 
           {/* 悬浮同步按钮 */}

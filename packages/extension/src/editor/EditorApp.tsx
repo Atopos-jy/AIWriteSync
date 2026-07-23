@@ -15,6 +15,8 @@ import {
   Link,
   Image,
   Strikethrough,
+  Sparkles,
+  Wand2,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -23,6 +25,7 @@ import { useDebounce } from "use-debounce";
 import { htmlToMarkdownNative, markdownToHtml } from "@aiwritesync/core";
 import { marked } from "marked";
 import { TipTapEditor } from "./TipTapEditor";
+import { useAIPolish } from "./useAIPolish";
 const logger = createLogger("Editor");
 
 export interface Article {
@@ -165,6 +168,23 @@ export function EditorApp() {
     top: number;
     left: number;
   } | null>(null);
+
+  // AI 润色
+  const {
+    loading: aiLoading,
+    error: aiError,
+    clearError: clearAIError,
+    checkConfigured,
+    polishTitle,
+    polishContent,
+    generateSummary,
+    suggestTags,
+  } = useAIPolish();
+
+  // 标题建议弹窗
+  const [titleSuggestions, setTitleSuggestions] = useState<string[]>([]);
+  const [selectedTitleIndex, setSelectedTitleIndex] = useState(0);
+  const [showTitlePanel, setShowTitlePanel] = useState(false);
 
   const [debouncedArticle] = useDebounce(article, 1000);
 
@@ -1358,8 +1378,67 @@ export function EditorApp() {
           >
             ━
           </button>
+          <div className="w-px h-4 bg-gray-300 mx-1" />
+
+          {/* AI 润色正文按钮 */}
+          <button
+            onClick={async () => {
+              const configured = await checkConfigured();
+              if (!configured) {
+                setError("请先在设置中配置 AI（API 地址和 Key）");
+                return;
+              }
+              const currentContent = isMDMode
+                ? (mdContentRef.current?.value ?? article.content)
+                : (tiptapEditor?.getHTML() ?? article.content);
+              if (!currentContent || currentContent.length < 10) {
+                setError("文章正文内容太少，无法进行 AI 润色");
+                return;
+              }
+              const polished = await polishContent(currentContent);
+              if (polished && polished !== currentContent) {
+                updateArticle("content", polished);
+                // 同步更新编辑器
+                if (isMDMode && mdContentRef.current) {
+                  mdContentRef.current.value = polished;
+                } else if (!isMDMode && tiptapEditor) {
+                  tiptapEditor.commands.setContent(polished);
+                }
+              }
+            }}
+            disabled={aiLoading === "content"}
+            className={cn(
+              "px-2.5 py-1.5 rounded text-sm transition-colors flex items-center gap-1.5",
+              aiLoading === "content"
+                ? "bg-purple-100 text-purple-400 cursor-not-allowed"
+                : "bg-purple-50 text-purple-600 hover:bg-purple-100 border border-purple-200"
+            )}
+            title="AI 润色正文"
+          >
+            {aiLoading === "content" ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="w-3.5 h-3.5" />
+            )}
+            AI 润色
+          </button>
         </div>
       </header>
+
+      {/* AI 操作加载提示 */}
+      {aiLoading && (
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 shadow-lg flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin text-purple-500 flex-shrink-0" />
+            <p className="text-sm text-purple-700">
+              {aiLoading === "title" && "AI 正在生成标题..."}
+              {aiLoading === "content" && "AI 正在润色正文..."}
+              {aiLoading === "summary" && "AI 正在生成摘要..."}
+              {aiLoading === "tags" && "AI 正在推荐标签..."}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* 频率限制警告 */}
       {rateLimitWarning && (
@@ -1382,27 +1461,109 @@ export function EditorApp() {
         <div className="w-full max-w-4xl mx-auto bg-white rounded-lg p-12 shadow-none">
           {/* 标题区域 */}
           <div className="text-left">
-            <div
-              ref={titleRef}
-              contentEditable
-              suppressContentEditableWarning
-              onBlur={(e) =>
-                updateArticle("title", e.currentTarget.innerText.trim())
-              }
-              className="w-full text-4xl font-bold text-gray-800 outline-none leading-tight border-b border-gray-100 placeholder-gray-400"
-              style={{ minHeight: "4rem", lineHeight: 1.4 }}
-              data-placeholder="请输入文章标题（最多64个字）"
-            >
-              {article.title || (
-                <span className="text-gray-300">
-                  请输入文章标题（最多64个字）
-                </span>
-              )}
+            <div className="flex items-start gap-2">
+              <div className="flex-1">
+                <div
+                  ref={titleRef}
+                  contentEditable
+                  suppressContentEditableWarning
+                  onBlur={(e) =>
+                    updateArticle("title", e.currentTarget.innerText.trim())
+                  }
+                  className="w-full text-4xl font-bold text-gray-800 outline-none leading-tight border-b border-gray-100 placeholder-gray-400"
+                  style={{ minHeight: "4rem", lineHeight: 1.4 }}
+                  data-placeholder="请输入文章标题（最多64个字）"
+                >
+                  {article.title || (
+                    <span className="text-gray-300">
+                      请输入文章标题（最多64个字）
+                    </span>
+                  )}
+                </div>
+                {/* 标题字数提示 */}
+                <div className="text-right text-xs text-gray-400 mt-1">
+                  {article.title.length}/64
+                </div>
+              </div>
+              {/* AI 润色标题按钮 */}
+              <button
+                onClick={async () => {
+                  const configured = await checkConfigured();
+                  if (!configured) {
+                    setError("请先在设置中配置 AI（API 地址和 Key）");
+                    return;
+                  }
+                  const currentContent = isMDMode
+                    ? (mdContentRef.current?.value ?? article.content)
+                    : (tiptapEditor?.getHTML() ?? article.content);
+                  const titles = await polishTitle(article.title, undefined, currentContent);
+                  if (titles.length > 1 || titles[0] !== article.title) {
+                    setTitleSuggestions(titles);
+                    setSelectedTitleIndex(0);
+                    setShowTitlePanel(true);
+                  }
+                }}
+                disabled={aiLoading === "title"}
+                className={cn(
+                  "flex-shrink-0 mt-1 px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-1.5",
+                  aiLoading === "title"
+                    ? "bg-purple-100 text-purple-400 cursor-not-allowed"
+                    : "bg-purple-50 text-purple-600 hover:bg-purple-100 border border-purple-200"
+                )}
+                title="AI 润色标题"
+              >
+                {aiLoading === "title" ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Wand2 className="w-4 h-4" />
+                )}
+                AI 润色标题
+              </button>
             </div>
-            {/* 标题字数提示（公众号风格：右下角小字） */}
-            <div className="text-right text-xs text-gray-400 mt-1">
-              {article.title.length}/64
-            </div>
+
+            {/* AI 标题建议面板 */}
+            {showTitlePanel && titleSuggestions.length > 0 && (
+              <div className="mt-3 p-3 bg-purple-50 rounded-lg border border-purple-200">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-purple-700 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3" />
+                    AI 建议标题
+                  </span>
+                  <button
+                    onClick={() => setShowTitlePanel(false)}
+                    className="text-purple-400 hover:text-purple-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="space-y-1.5">
+                  {titleSuggestions.map((t, i) => (
+                    <div
+                      key={i}
+                      onClick={() => {
+                        setSelectedTitleIndex(i);
+                        updateArticle("title", t);
+                        if (titleRef.current) {
+                          titleRef.current.innerText = t;
+                        }
+                        setShowTitlePanel(false);
+                      }}
+                      className={cn(
+                        "flex items-center gap-2 p-2 rounded text-sm cursor-pointer transition-colors",
+                        i === selectedTitleIndex
+                          ? "bg-purple-200 text-purple-900"
+                          : "bg-white text-gray-700 hover:bg-purple-100"
+                      )}
+                    >
+                      <span className="text-xs text-purple-400 font-medium w-5 text-center">
+                        {i + 1}
+                      </span>
+                      <span className="flex-1">{t}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 作者/编辑信息栏 */}
@@ -1672,9 +1833,42 @@ export function EditorApp() {
 
           {/* 文章摘要模块 */}
           <div className="mb-6">
-            <label className="block text-gray-700 font-normal mb-2 text-base">
-              文章摘要
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-gray-700 font-normal text-base">
+                文章摘要
+              </label>
+              <button
+                onClick={async () => {
+                  const configured = await checkConfigured();
+                  if (!configured) {
+                    setError("请先在设置中配置 AI（API 地址和 Key）");
+                    return;
+                  }
+                  const currentContent = isMDMode
+                    ? (mdContentRef.current?.value ?? article.content)
+                    : (tiptapEditor?.getHTML() ?? article.content);
+                  const summary = await generateSummary(currentContent, 256);
+                  if (summary) {
+                    updateArticle("summary", summary);
+                  }
+                }}
+                disabled={aiLoading === "summary"}
+                className={cn(
+                  "px-2.5 py-1 rounded text-xs transition-colors flex items-center gap-1",
+                  aiLoading === "summary"
+                    ? "bg-purple-100 text-purple-400 cursor-not-allowed"
+                    : "bg-purple-50 text-purple-500 hover:bg-purple-100 border border-purple-200"
+                )}
+                title="AI 生成摘要"
+              >
+                {aiLoading === "summary" ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3 h-3" />
+                )}
+                AI 生成
+              </button>
+            </div>
             <div className="flex flex-col gap-1">
               <textarea
                 value={article.summary || ""}
@@ -1700,12 +1894,50 @@ export function EditorApp() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
             {/* 文章标签 */}
             <div>
-              <label className="block text-gray-700 font-normal mb-2 text-base">
-                文章标签{" "}
-                <span className="text-base text-gray-400">
-                  (多个标签用逗号分隔)
-                </span>
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-gray-700 font-normal text-base">
+                  文章标签{" "}
+                  <span className="text-base text-gray-400">
+                    (多个标签用逗号分隔)
+                  </span>
+                </label>
+                <button
+                  onClick={async () => {
+                    const configured = await checkConfigured();
+                    if (!configured) {
+                      setError("请先在设置中配置 AI（API 地址和 Key）");
+                      return;
+                    }
+                    const currentContent = isMDMode
+                      ? (mdContentRef.current?.value ?? article.content)
+                      : (tiptapEditor?.getHTML() ?? article.content);
+                    const tags = await suggestTags(currentContent);
+                    if (tags.length > 0) {
+                      updateArticle("tags", [
+                        ...(article.tags || []),
+                        ...tags.filter(
+                          (t) => !(article.tags || []).includes(t)
+                        ),
+                      ]);
+                    }
+                  }}
+                  disabled={aiLoading === "tags"}
+                  className={cn(
+                    "px-2.5 py-1 rounded text-xs transition-colors flex items-center gap-1",
+                    aiLoading === "tags"
+                      ? "bg-purple-100 text-purple-400 cursor-not-allowed"
+                      : "bg-purple-50 text-purple-500 hover:bg-purple-100 border border-purple-200"
+                  )}
+                  title="AI 推荐标签"
+                >
+                  {aiLoading === "tags" ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-3 h-3" />
+                  )}
+                  AI 推荐
+                </button>
+              </div>
               <div className="flex flex-wrap gap-2 items-center">
                 {/* 已选标签展示（对标CSDN标签样式） */}
                 {article.tags && article.tags.length > 0 ? (
