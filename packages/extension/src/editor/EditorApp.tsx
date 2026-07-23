@@ -1395,15 +1395,18 @@ export function EditorApp() {
                 setError("文章正文内容太少，无法进行 AI 润色");
                 return;
               }
-              const polished = await polishContent(currentContent);
-              if (polished && polished !== currentContent) {
-                updateArticle("content", polished);
-                // 同步更新编辑器
-                if (isMDMode && mdContentRef.current) {
-                  mdContentRef.current.value = polished;
-                } else if (!isMDMode && tiptapEditor) {
-                  tiptapEditor.commands.setContent(polished);
+              try {
+                const polished = await polishContent(currentContent);
+                if (polished && polished !== currentContent) {
+                  updateArticle("content", polished);
+                  if (isMDMode && mdContentRef.current) {
+                    mdContentRef.current.value = polished;
+                  } else if (!isMDMode && tiptapEditor) {
+                    tiptapEditor.commands.setContent(polished);
+                  }
                 }
+              } catch (e) {
+                setError((e as Error).message || "AI 正文润色失败");
               }
             }}
             disabled={aiLoading === "content"}
@@ -1493,16 +1496,18 @@ export function EditorApp() {
                     setError("请先在设置中配置 AI（API 地址和 Key）");
                     return;
                   }
-                  const currentContent = isMDMode
-                    ? (mdContentRef.current?.value ?? article.content)
-                    : (tiptapEditor?.getHTML() ?? article.content);
-                  const titles = await polishTitle(article.title, undefined, currentContent);
-                  if (titles.length > 1 || titles[0] !== article.title) {
-                    setTitleSuggestions(titles);
-                    setSelectedTitleIndex(0);
-                    setShowTitlePanel(true);
-                  } else if (aiError) {
-                    setError(aiError);
+                  try {
+                    const currentContent = isMDMode
+                      ? (mdContentRef.current?.value ?? article.content)
+                      : (tiptapEditor?.getHTML() ?? article.content);
+                    const titles = await polishTitle(article.title, undefined, currentContent);
+                    if (titles.length > 0) {
+                      setTitleSuggestions(titles);
+                      setSelectedTitleIndex(0);
+                      setShowTitlePanel(true);
+                    }
+                  } catch (e) {
+                    setError((e as Error).message || "AI 标题润色失败");
                   }
                 }}
                 disabled={aiLoading === "title"}
@@ -1846,12 +1851,16 @@ export function EditorApp() {
                     setError("请先在设置中配置 AI（API 地址和 Key）");
                     return;
                   }
-                  const currentContent = isMDMode
-                    ? (mdContentRef.current?.value ?? article.content)
-                    : (tiptapEditor?.getHTML() ?? article.content);
-                  const summary = await generateSummary(currentContent, 256);
-                  if (summary) {
-                    updateArticle("summary", summary);
+                  try {
+                    const currentContent = isMDMode
+                      ? (mdContentRef.current?.value ?? article.content)
+                      : (tiptapEditor?.getHTML() ?? article.content);
+                    const summary = await generateSummary(currentContent, 256);
+                    if (summary) {
+                      updateArticle("summary", summary);
+                    }
+                  } catch (e) {
+                    setError((e as Error).message || "AI 摘要生成失败");
                   }
                 }}
                 disabled={aiLoading === "summary"}
@@ -1910,17 +1919,21 @@ export function EditorApp() {
                       setError("请先在设置中配置 AI（API 地址和 Key）");
                       return;
                     }
-                    const currentContent = isMDMode
-                      ? (mdContentRef.current?.value ?? article.content)
-                      : (tiptapEditor?.getHTML() ?? article.content);
-                    const tags = await suggestTags(currentContent);
-                    if (tags.length > 0) {
-                      updateArticle("tags", [
-                        ...(article.tags || []),
-                        ...tags.filter(
-                          (t) => !(article.tags || []).includes(t)
-                        ),
-                      ]);
+                    try {
+                      const currentContent = isMDMode
+                        ? (mdContentRef.current?.value ?? article.content)
+                        : (tiptapEditor?.getHTML() ?? article.content);
+                      const tags = await suggestTags(currentContent);
+                      if (tags.length > 0) {
+                        updateArticle("tags", [
+                          ...(article.tags || []),
+                          ...tags.filter(
+                            (t) => !(article.tags || []).includes(t)
+                          ),
+                        ]);
+                      }
+                    } catch (e) {
+                      setError((e as Error).message || "AI 标签推荐失败");
                     }
                   }}
                   disabled={aiLoading === "tags"}
